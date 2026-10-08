@@ -67,6 +67,10 @@ class MainActivity : ComponentActivity() {
         // Initialize Android NFC adapter
         nfcAdapter = NfcAdapter.getDefaultAdapter(this)
 
+        // Initialize build flavor configuration
+        com.focal.app.config.FocalConfig.isDemoMode = BuildConfig.IS_DEMO_MODE
+        com.focal.app.config.FocalConfig.isDebug = BuildConfig.DEBUG
+
         // Bind Context to Permissions Helper
         com.focal.app.ui.components.PlatformPermissionsHelper.appContext = applicationContext
 

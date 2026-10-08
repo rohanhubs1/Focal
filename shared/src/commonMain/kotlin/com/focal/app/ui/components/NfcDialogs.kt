@@ -287,9 +287,13 @@ fun AddCardFlowModal(
         val inspection = repository.inspectCardForRegistration(rawPayload, currentUser.id)
         when (inspection) {
             is CardRegistrationInspection.BlankTag -> {
-                val newCard = repository.writeAndRegisterBlankCard(currentUser.id, currentUser.name)
-                registeredCard = newCard
-                step = 2
+                if (com.focal.app.config.FocalConfig.allowParentBlankCardWriting) {
+                    val newCard = repository.writeAndRegisterBlankCard(currentUser.id, currentUser.name)
+                    registeredCard = newCard
+                    step = 2
+                } else {
+                    errorMessage = "This card isn't set up. Contact FOCAL support."
+                }
             }
             is CardRegistrationInspection.UnownedInStock -> {
                 val newCard = repository.registerCardToParent(inspection.card.token, currentUser.id, currentUser.name)
@@ -369,73 +373,75 @@ fun AddCardFlowModal(
                         Banner(message = errorMessage ?: "", isDanger = true)
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    if (com.focal.app.config.FocalConfig.isDemoMode) {
+                        Spacer(modifier = Modifier.height(20.dp))
 
-                    Text(
-                        text = "SIMULATED TAG READER (DEMO)",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            letterSpacing = 1.sp,
-                            color = FocalColors.TextSecondary,
-                            fontWeight = FontWeight.Bold
+                        Text(
+                            text = "SIMULATED TAG READER (DEMO)",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                letterSpacing = 1.sp,
+                                color = FocalColors.TextSecondary,
+                                fontWeight = FontWeight.Bold
+                            )
                         )
-                    )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                    // Simulator button 1: Blank tag
-                    SecondaryButton(
-                        text = "Tap Blank Sticker / New Tag",
-                        onClick = { handleTagScan("BLANK") },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                    )
+                        // Simulator button 1: Blank tag
+                        SecondaryButton(
+                            text = "Tap Blank Sticker / New Tag",
+                            onClick = { handleTagScan("BLANK") },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                        )
 
-                    // Simulator button 2: Unowned inventory card
-                    SecondaryButton(
-                        text = "Tap Unowned Inventory Card (FC0003)",
-                        onClick = { handleTagScan("FOCUSCARD:TK_UNOWNED_FC0003") },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                    )
+                        // Simulator button 2: Unowned inventory card
+                        SecondaryButton(
+                            text = "Tap Unowned Inventory Card (FC0003)",
+                            onClick = { handleTagScan("FOCUSCARD:TK_UNOWNED_FC0003") },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                        )
 
-                    // Simulator button 3: Already owned card
-                    SecondaryButton(
-                        text = "Tap My Card (FC0001)",
-                        onClick = { handleTagScan("FOCUSCARD:8XK92LM7") },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                    )
+                        // Simulator button 3: Already owned card
+                        SecondaryButton(
+                            text = "Tap My Card (FC0001)",
+                            onClick = { handleTagScan("FOCUSCARD:8XK92LM7") },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                        )
 
-                    // Simulator button 4: Other parent's card
-                    SecondaryButton(
-                        text = "Tap Other Parent's Card",
-                        onClick = {
-                            val otherCard = FocusCard(
-                                id = "card_other",
-                                cardId = "FC9999",
-                                token = "TK_OTHER_PARENT",
-                                ownerParentId = "user_other_parent",
-                                status = CardStatus.REGISTERED
-                            )
-                            repository.nfcCards.add(otherCard)
-                            handleTagScan("FOCUSCARD:TK_OTHER_PARENT")
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                    )
+                        // Simulator button 4: Other parent's card
+                        SecondaryButton(
+                            text = "Tap Other Parent's Card",
+                            onClick = {
+                                val otherCard = FocusCard(
+                                    id = "card_other",
+                                    cardId = "FC9999",
+                                    token = "TK_OTHER_PARENT",
+                                    ownerParentId = "user_other_parent",
+                                    status = CardStatus.REGISTERED
+                                )
+                                repository.nfcCards.add(otherCard)
+                                handleTagScan("FOCUSCARD:TK_OTHER_PARENT")
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                        )
 
-                    // Simulator button 5: Revoked card
-                    SecondaryButton(
-                        text = "Tap Revoked Card",
-                        onClick = {
-                            val revokedCard = FocusCard(
-                                id = "card_revoked",
-                                cardId = "FC8888",
-                                token = "TK_REVOKED",
-                                ownerParentId = null,
-                                status = CardStatus.REVOKED
-                            )
-                            repository.nfcCards.add(revokedCard)
-                            handleTagScan("FOCUSCARD:TK_REVOKED")
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                    )
+                        // Simulator button 5: Revoked card
+                        SecondaryButton(
+                            text = "Tap Revoked Card",
+                            onClick = {
+                                val revokedCard = FocusCard(
+                                    id = "card_revoked",
+                                    cardId = "FC8888",
+                                    token = "TK_REVOKED",
+                                    ownerParentId = null,
+                                    status = CardStatus.REVOKED
+                                )
+                                repository.nfcCards.add(revokedCard)
+                                handleTagScan("FOCUSCARD:TK_REVOKED")
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                        )
+                    }
                 }
 
                 2 -> {

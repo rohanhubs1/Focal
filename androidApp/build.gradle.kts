@@ -57,5 +57,19 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    flavorDimensions += "mode"
+    productFlavors {
+        create("demo") {
+            dimension = "mode"
+            applicationIdSuffix = ".demo"
+            buildConfigField("Boolean", "IS_DEMO_MODE", "true")
+        }
+        create("full") {
+            dimension = "mode"
+            buildConfigField("Boolean", "IS_DEMO_MODE", "false")
+        }
     }
 }

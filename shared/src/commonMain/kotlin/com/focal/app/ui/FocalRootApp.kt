@@ -621,29 +621,31 @@ fun FocalRootApp(
                     }
 
                     // DEV Floating Pill Button (Debug Mode / Role Switcher)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .windowInsetsPadding(WindowInsets.statusBars)
-                            .padding(top = 8.dp, end = 12.dp),
-                        contentAlignment = Alignment.TopEnd
-                    ) {
+                    if (com.focal.app.config.FocalConfig.showDevRoleSwitcher) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFF1F1F1F))
-                                .border(1.dp, Color(0xFF555555), RoundedCornerShape(12.dp))
-                                .clickable { showRoleSwitcherModal = true }
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                                .fillMaxSize()
+                                .windowInsetsPadding(WindowInsets.statusBars)
+                                .padding(top = 8.dp, end = 12.dp),
+                            contentAlignment = Alignment.TopEnd
                         ) {
-                            Text(
-                                text = "DEV",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    fontSize = 11.sp
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF1F1F1F))
+                                    .border(1.dp, Color(0xFF555555), RoundedCornerShape(12.dp))
+                                    .clickable { showRoleSwitcherModal = true }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = "DEV",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        fontSize = 11.sp
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
 

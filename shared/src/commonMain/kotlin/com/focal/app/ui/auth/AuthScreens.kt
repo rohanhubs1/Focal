@@ -860,8 +860,10 @@ fun ParentPairChildScreen(
     var isConnected by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        delay(4000)
-        isConnected = true
+        if (com.focal.app.config.FocalConfig.isDemoMode) {
+            delay(4000)
+            isConnected = true
+        }
     }
 
     Box(
@@ -970,7 +972,7 @@ fun ParentPairChildScreen(
             }
         }
 
-        if (!isConnected) {
+        if (!isConnected && com.focal.app.config.FocalConfig.allowSameDevicePairing) {
             PrimaryButton(
                 text = "Pair this phone (demo)",
                 onClick = {
