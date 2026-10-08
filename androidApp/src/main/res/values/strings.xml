@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">FOCAL</string>
+    <string name="accessibility_service_label">FOCAL Focus Barrier Service</string>
+    <string name="accessibility_service_description">Enables FOCAL to detect when restricted apps and websites are opened during active focus sessions and display the calm focus screen.</string>
+</resources>
