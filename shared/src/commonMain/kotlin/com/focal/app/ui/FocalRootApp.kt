@@ -20,7 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import com.focal.app.data.FocalLocalStorage
 import com.focal.app.data.FocalRepository
 import com.focal.app.engine.FocusEngine
 import com.focal.app.model.*
@@ -36,14 +36,18 @@ enum class AppScreenState {
     SPLASH,
     ONBOARDING,
     ROLE_SELECTION,
+    PERSONALIZATION_PARENT,
+    PERSONALIZATION_CHILD,
     PARENT_LOGIN,
     PARENT_SIGN_UP,
     PARENT_FORGOT_PASSWORD,
+    PARENT_PERMISSIONS,
     PARENT_ADD_CHILD,
     PARENT_PAIR_CHILD,
     CHILD_PAIRING,
-    PERMISSIONS_SETUP,
+    CHILD_PERMISSIONS,
     CARD_SETUP,
+    PROTECTION_OFF,
     MAIN_APP
 }
 
@@ -70,6 +74,50 @@ fun FocalRootApp(
         screenBackStack.remove(target)
         screenBackStack.add(target)
         screenState = target
+    }
+
+    fun checkAllChildPermissionsOn(): Boolean {
+        return PlatformPermissionsHelper.isAccessibilityEnabled() &&
+               PlatformPermissionsHelper.isOverlayEnabled() &&
+               PlatformPermissionsHelper.isUsageAccessEnabled() &&
+               PlatformPermissionsHelper.isNotificationPermissionGranted() &&
+               PlatformPermissionsHelper.isBatteryOptimizationDisabled() &&
+               PlatformPermissionsHelper.isExactAlarmPermissionGranted() &&
+               PlatformPermissionsHelper.isDeviceAdminActive()
+    }
+
+    fun computeStartScreen(): AppScreenState {
+        val onboardingDone = FocalLocalStorage.getBoolean("KEY_ONBOARDING_DONE", false)
+        if (!onboardingDone) return AppScreenState.ONBOARDING
+
+        val role = FocalLocalStorage.getString("KEY_SELECTED_ROLE", "")
+        if (role.isEmpty()) return AppScreenState.ROLE_SELECTION
+
+        val personalizationDone = FocalLocalStorage.getBoolean("KEY_PERSONALIZATION_DONE", false)
+        val authDone = FocalLocalStorage.getBoolean("KEY_AUTH_DONE", false)
+
+        if (role == "PARENT") {
+            if (!authDone) {
+                if (!personalizationDone) return AppScreenState.PERSONALIZATION_PARENT
+                return AppScreenState.PARENT_LOGIN
+            }
+            val parentPermsAsked = FocalLocalStorage.getBoolean("KEY_PARENT_NOTIFICATIONS_ASKED", false)
+            if (!parentPermsAsked) return AppScreenState.PARENT_PERMISSIONS
+            return AppScreenState.MAIN_APP
+        } else { // CHILD
+            if (!authDone) {
+                if (!personalizationDone) return AppScreenState.PERSONALIZATION_CHILD
+                return AppScreenState.CHILD_PAIRING
+            }
+            val setupDone = FocalLocalStorage.getBoolean("KEY_SETUP_DONE", false)
+            val allRequiredOn = checkAllChildPermissionsOn()
+            if (!setupDone) {
+                if (!allRequiredOn) return AppScreenState.CHILD_PERMISSIONS
+                return AppScreenState.CARD_SETUP
+            }
+            if (!allRequiredOn) return AppScreenState.PROTECTION_OFF
+            return AppScreenState.MAIN_APP
+        }
     }
 
     // Role-based bottom navigation tab index (4 tabs for Parent, 4 tabs for Child)
@@ -216,42 +264,7 @@ fun FocalRootApp(
     FocalBackHandler(enabled = canGoBack, onBack = handleBack)
 
     FocalTheme {
-        if (currentUser.role == UserRole.CHILD && repository.isProtectionDisabledOnChild) {
-            Dialog(onDismissRequest = {}) {
-                FocalCard(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        StatusBadge(text = "PROTECTION OFF", badgeType = BadgeType.ACTIVE)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Protection is Off — Turn it Back On",
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = FocalColors.Danger),
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = repository.protectionDisabledReason.ifEmpty { "Required permissions were revoked on your device." },
-                            style = MaterialTheme.typography.bodyMedium.copy(color = FocalColors.TextSecondary, textAlign = TextAlign.Center)
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        PrimaryButton(
-                            text = "Fix System Settings Now",
-                            onClick = {
-                                if (!PlatformPermissionsHelper.isAccessibilityEnabled()) {
-                                    PlatformPermissionsHelper.openAccessibilitySettings()
-                                } else if (!PlatformPermissionsHelper.isOverlayEnabled()) {
-                                    PlatformPermissionsHelper.openOverlaySettings()
-                                } else if (!PlatformPermissionsHelper.isUsageAccessEnabled()) {
-                                    PlatformPermissionsHelper.openUsageAccessSettings()
-                                } else {
-                                    PlatformPermissionsHelper.openNotificationSettings()
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            }
-        } else if (showComponentGallery) {
+        if (showComponentGallery) {
             ComponentGalleryScreen(onBack = { showComponentGallery = false })
         } else {
             Scaffold(
@@ -323,14 +336,23 @@ fun FocalRootApp(
                     when (targetScreen) {
                         AppScreenState.SPLASH -> {
                             SplashScreen(
-                                onSplashFinished = { navigateToScreen(AppScreenState.ONBOARDING, clearHistory = true) }
+                                onSplashFinished = {
+                                    val startScreen = computeStartScreen()
+                                    navigateToScreen(startScreen, clearHistory = true)
+                                }
                             )
                         }
 
                         AppScreenState.ONBOARDING -> {
                             OnboardingFlowScreen(
-                                onOnboardingFinished = { navigateToScreen(AppScreenState.ROLE_SELECTION) },
-                                onSkip = { navigateToScreen(AppScreenState.ROLE_SELECTION) }
+                                onOnboardingFinished = {
+                                    FocalLocalStorage.saveBoolean("KEY_ONBOARDING_DONE", true)
+                                    navigateToScreen(AppScreenState.ROLE_SELECTION)
+                                },
+                                onSkip = {
+                                    FocalLocalStorage.saveBoolean("KEY_ONBOARDING_DONE", true)
+                                    navigateToScreen(AppScreenState.ROLE_SELECTION)
+                                }
                             )
                         }
 
@@ -339,18 +361,47 @@ fun FocalRootApp(
                                 onRoleConfirmed = { selectedRole ->
                                     repository.switchUserRole(selectedRole)
                                     if (selectedRole == UserRole.CONTROLLER) {
-                                        navigateToScreen(AppScreenState.PARENT_LOGIN)
+                                        FocalLocalStorage.saveString("KEY_SELECTED_ROLE", "PARENT")
+                                        val pDone = FocalLocalStorage.getBoolean("KEY_PERSONALIZATION_DONE", false)
+                                        navigateToScreen(if (pDone) AppScreenState.PARENT_LOGIN else AppScreenState.PERSONALIZATION_PARENT)
                                     } else {
-                                        navigateToScreen(AppScreenState.CHILD_PAIRING)
+                                        FocalLocalStorage.saveString("KEY_SELECTED_ROLE", "CHILD")
+                                        val pDone = FocalLocalStorage.getBoolean("KEY_PERSONALIZATION_DONE", false)
+                                        navigateToScreen(if (pDone) AppScreenState.CHILD_PAIRING else AppScreenState.PERSONALIZATION_CHILD)
                                     }
+                                },
+                                onDirectSignInClick = {
+                                    FocalLocalStorage.saveString("KEY_SELECTED_ROLE", "PARENT")
+                                    repository.switchUserRole(UserRole.CONTROLLER)
+                                    navigateToScreen(AppScreenState.PARENT_LOGIN)
                                 }
+                            )
+                        }
+
+                        AppScreenState.PERSONALIZATION_PARENT -> {
+                            ParentPersonalizationFlow(
+                                onComplete = { navigateToScreen(AppScreenState.PARENT_SIGN_UP) },
+                                onBackToRoleSelect = { navigateToScreen(AppScreenState.ROLE_SELECTION) }
+                            )
+                        }
+
+                        AppScreenState.PERSONALIZATION_CHILD -> {
+                            ChildPersonalizationFlow(
+                                onComplete = { navigateToScreen(AppScreenState.CHILD_PAIRING) },
+                                onBackToRoleSelect = { navigateToScreen(AppScreenState.ROLE_SELECTION) }
                             )
                         }
 
                         AppScreenState.PARENT_LOGIN -> {
                             ParentLoginScreen(
                                 onLoginSuccess = {
-                                    navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                                    FocalLocalStorage.saveBoolean("KEY_AUTH_DONE", true)
+                                    val asked = FocalLocalStorage.getBoolean("KEY_PARENT_NOTIFICATIONS_ASKED", false)
+                                    if (!asked) {
+                                        navigateToScreen(AppScreenState.PARENT_PERMISSIONS)
+                                    } else {
+                                        navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                                    }
                                 },
                                 onNavigateToSignUp = { navigateToScreen(AppScreenState.PARENT_SIGN_UP) },
                                 onNavigateToForgotPassword = { navigateToScreen(AppScreenState.PARENT_FORGOT_PASSWORD) },
@@ -361,7 +412,13 @@ fun FocalRootApp(
                         AppScreenState.PARENT_SIGN_UP -> {
                             ParentSignUpScreen(
                                 onSignUpSuccess = {
-                                    navigateToScreen(AppScreenState.PARENT_ADD_CHILD)
+                                    FocalLocalStorage.saveBoolean("KEY_AUTH_DONE", true)
+                                    val asked = FocalLocalStorage.getBoolean("KEY_PARENT_NOTIFICATIONS_ASKED", false)
+                                    if (!asked) {
+                                        navigateToScreen(AppScreenState.PARENT_PERMISSIONS)
+                                    } else {
+                                        navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                                    }
                                 },
                                 onNavigateToLogin = { navigateToScreen(AppScreenState.PARENT_LOGIN) },
                                 repository = repository
@@ -371,6 +428,19 @@ fun FocalRootApp(
                         AppScreenState.PARENT_FORGOT_PASSWORD -> {
                             ParentForgotPasswordScreen(
                                 onBackToLogin = { navigateToScreen(AppScreenState.PARENT_LOGIN) }
+                            )
+                        }
+
+                        AppScreenState.PARENT_PERMISSIONS -> {
+                            ParentPermissionsScreen(
+                                onPermissionsComplete = {
+                                    FocalLocalStorage.saveBoolean("KEY_PARENT_NOTIFICATIONS_ASKED", true)
+                                    navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                                },
+                                onSkipWithWarning = {
+                                    FocalLocalStorage.saveBoolean("KEY_PARENT_NOTIFICATIONS_ASKED", true)
+                                    navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                                }
                             )
                         }
 
@@ -395,22 +465,34 @@ fun FocalRootApp(
                         AppScreenState.CHILD_PAIRING -> {
                             ChildPairingScreen(
                                 onPairingSuccess = {
-                                    navigateToScreen(AppScreenState.PERMISSIONS_SETUP)
+                                    FocalLocalStorage.saveBoolean("KEY_AUTH_DONE", true)
+                                    navigateToScreen(AppScreenState.CHILD_PERMISSIONS)
                                 }
                             )
                         }
 
-                        AppScreenState.PERMISSIONS_SETUP -> {
-                            PermissionsSetupScreen(
-                                onPermissionsComplete = { navigateToScreen(AppScreenState.CARD_SETUP) },
-                                onSkip = { navigateToScreen(AppScreenState.CARD_SETUP) }
+                        AppScreenState.CHILD_PERMISSIONS -> {
+                            ChildPermissionsSetupScreen(
+                                onPermissionsComplete = { navigateToScreen(AppScreenState.CARD_SETUP) }
                             )
                         }
 
                         AppScreenState.CARD_SETUP -> {
                             CardSetupScreen(
-                                onSetupFinished = { navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true) },
-                                onSkip = { navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true) }
+                                onSetupFinished = {
+                                    FocalLocalStorage.saveBoolean("KEY_SETUP_DONE", true)
+                                    navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                                },
+                                onSkip = {
+                                    FocalLocalStorage.saveBoolean("KEY_SETUP_DONE", true)
+                                    navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                                }
+                            )
+                        }
+
+                        AppScreenState.PROTECTION_OFF -> {
+                            ProtectionOffScreen(
+                                onGoToReadOnlyHome = { navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true) }
                             )
                         }
 
@@ -430,13 +512,13 @@ fun FocalRootApp(
                                             onQrScanClick = { showQrScanner = true },
                                             onViewActiveSession = { showActiveFocusScreen = true },
                                             onViewInsights = { selectChildTab(2) },
-                                            onOpenPermissions = { showPermissionsModal = true }
+                                            onOpenPermissions = { navigateToScreen(AppScreenState.CHILD_PERMISSIONS) }
                                         )
                                         1 -> SchedulesScreen()
                                         2 -> InsightsScreen()
                                         3 -> ChildProfileScreen(
                                             onLogout = { navigateToScreen(AppScreenState.ROLE_SELECTION, clearHistory = true) },
-                                            onOpenPermissions = { showPermissionsModal = true },
+                                            onOpenPermissions = { navigateToScreen(AppScreenState.CHILD_PERMISSIONS) },
                                             onOpenNfcTap = { showNfcScanner = true }
                                         )
                                     }
@@ -465,7 +547,7 @@ fun FocalRootApp(
                                                 onChildSelected = { selectedChildForManagement = it },
                                                 onAddChildClick = { showAddChildModal = true },
                                                 onCreatePolicyClick = { showCreatePolicyModal = true },
-                                                onOpenPermissions = { showPermissionsModal = true }
+                                                onOpenPermissions = { navigateToScreen(AppScreenState.PARENT_PERMISSIONS) }
                                             )
                                             1 -> ChildrenDirectoryScreen(
                                                 onChildSelected = { selectedChildForManagement = it },
@@ -486,10 +568,8 @@ fun FocalRootApp(
                                             )
                                             3 -> ControllerProfileScreen(
                                                 onLogout = { navigateToScreen(AppScreenState.ROLE_SELECTION, clearHistory = true) },
-                                                onOpenPermissions = { showPermissionsModal = true },
-                                                onOpenNfcManager = { showNfcScanner = true },
-                                                onOpenGenerateQr = { showCreatePolicyModal = true },
-                                                onCreatePolicyClick = { showCreatePolicyModal = true }
+                                                onOpenChildrenTab = { selectControllerTab(1) },
+                                                repository = repository
                                             )
                                         }
                                     }
@@ -501,164 +581,156 @@ fun FocalRootApp(
                             }
                         }
                     }
+                }
 
-                    // Completed Focus Summary Modal
-                    focusEngine.lastCompletedSummary?.let { session ->
-                        FocusSummaryScreen(
-                            session = session,
-                            onDismiss = {
-                                focusEngine.dismissSummary()
-                                showActiveFocusScreen = false
-                            }
-                        )
-                    }
+                // Completed Focus Summary Modal
+                focusEngine.lastCompletedSummary?.let { session ->
+                    FocusSummaryScreen(
+                        session = session,
+                        onDismiss = {
+                            focusEngine.dismissSummary()
+                            showActiveFocusScreen = false
+                        }
+                    )
+                }
 
-                    // Protection Disabled Modal Warning
-                    if (!focusEngine.isProtectionActive && (currentUser.role == UserRole.CHILD || focusEngine.sessionState == SessionState.ACTIVE)) {
-                        ProtectionDisabledModal(
-                            focusEngine = focusEngine,
-                            onDismiss = { focusEngine.checkAndUpdatePermissions() }
-                        )
-                    }
+                // Blocked App Overlay Experience
+                focusEngine.blockedAppOverlayName?.let { blockedApp ->
+                    BlockedAppOverlay(
+                        appName = blockedApp,
+                        onDismiss = { focusEngine.dismissBlockedOverlay() }
+                    )
+                }
 
-                    // Blocked App Overlay Experience
-                    focusEngine.blockedAppOverlayName?.let { blockedApp ->
-                        BlockedAppOverlay(
-                            appName = blockedApp,
-                            onDismiss = { focusEngine.dismissBlockedOverlay() }
-                        )
-                    }
-
-                    // Active Focus Overlay Screen
-                    if (showActiveFocusScreen && focusEngine.currentSession != null) {
-                        ActiveFocusScreen(
-                            onEndFocusClick = {
-                                if (currentUser.planType == PlanType.NFC) {
-                                    showNfcScanner = true
-                                } else {
-                                    showQrScanner = true
-                                }
-                            }
-                        )
-                    }
-
-                    // Error Alert Dialog for Validation Failures
-                    var validationErrorMessage by remember { mutableStateOf<String?>(null) }
-                    if (validationErrorMessage != null) {
-                        ErrorState(
-                            title = "Access Error",
-                            description = validationErrorMessage!!,
-                            onRetry = { validationErrorMessage = null }
-                        )
-                    }
-
-                    // NFC Scanner Dialog
-                    if (showNfcScanner) {
-                        val isSessionActive = focusEngine.sessionState == SessionState.ACTIVE
-                        NfcScannerModal(
-                            title = if (isSessionActive) "Tap Card to End Focus" else "Tap Focus Card to Start",
-                            subtitle = if (isSessionActive) "Hold your registered NFC card to unlock apps." else "Hold your card near NFC area to begin restrictions.",
-                            onDismiss = { showNfcScanner = false },
-                            onCardScanned = { card ->
-                                showNfcScanner = false
-                                if (isSessionActive) {
-                                    val res = focusEngine.endFocusWithNfc(card.cardId, currentUser)
-                                    if (res.isFailure) {
-                                        validationErrorMessage = res.exceptionOrNull()?.message ?: "Only your paired card FC0001 can unlock this session."
-                                    }
-                                } else {
-                                    val res = focusEngine.startFocusWithNfc(card.cardId, currentUser)
-                                    if (res.isSuccess) {
-                                        showActiveFocusScreen = true
-                                    } else {
-                                        validationErrorMessage = res.exceptionOrNull()?.message ?: "This card isn't paired to you."
-                                    }
-                                }
-                            }
-                        )
-                    }
-
-                    // QR Scanner Dialog
-                    if (showQrScanner) {
-                        val isSessionActive = focusEngine.sessionState == SessionState.ACTIVE
-                        QrScannerModal(
-                            title = if (isSessionActive) "Scan QR to End Focus" else "Scan Focus QR to Start",
-                            subtitle = if (isSessionActive) "Scan QR to verify and remove restrictions." else "Scan Focus QR to start session.",
-                            onDismiss = { showQrScanner = false },
-                            onQrScanned = { qr ->
-                                showQrScanner = false
-                                if (isSessionActive) {
-                                    focusEngine.endFocus(TriggerType.QR, qr.token)
-                                } else {
-                                    val res = focusEngine.startFocusWithQr(qr.token, currentUser)
-                                    if (res.isSuccess) {
-                                        showActiveFocusScreen = true
-                                    } else {
-                                        validationErrorMessage = res.exceptionOrNull()?.message ?: "Invalid or expired Focus QR code."
-                                    }
-                                }
-                            }
-                        )
-                    }
-
-                    // Add Child Modal
-                    if (showAddChildModal) {
-                        AddChildModal(onDismiss = { showAddChildModal = false })
-                    }
-
-                    // Create Policy Modal
-                    if (showCreatePolicyModal) {
-                        CreateFocusPolicyScreen(onDismiss = { showCreatePolicyModal = false })
-                    }
-
-                    // Generated Focus QR Modal
-                    generatedFocusQrModal?.let { (qr, childName) ->
-                        QrDisplayModal(
-                            qrToken = qr,
-                            childName = childName,
-                            onDismiss = { generatedFocusQrModal = null }
-                        )
-                    }
-
-                    // DEV Floating Pill Button (Debug Mode / Role Switcher)
-                    if (com.focal.app.config.FocalConfig.showDevRoleSwitcher) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .windowInsetsPadding(WindowInsets.statusBars)
-                                .padding(top = 8.dp, end = 12.dp),
-                            contentAlignment = Alignment.TopEnd
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0xFF1F1F1F))
-                                    .border(1.dp, Color(0xFF555555), RoundedCornerShape(12.dp))
-                                    .clickable { showRoleSwitcherModal = true }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                            ) {
-                                Text(
-                                    text = "DEV",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        fontSize = 11.sp
-                                    )
-                                )
+                // Active Focus Overlay Screen
+                if (showActiveFocusScreen && focusEngine.currentSession != null) {
+                    ActiveFocusScreen(
+                        onEndFocusClick = {
+                            if (currentUser.planType == PlanType.NFC) {
+                                showNfcScanner = true
+                            } else {
+                                showQrScanner = true
                             }
                         }
-                    }
+                    )
+                }
 
-                    // Role Switcher Modal
-                    if (showRoleSwitcherModal) {
-                        RoleSwitcherModal(
-                            onDismiss = { showRoleSwitcherModal = false },
-                            onRoleSelected = { role ->
-                                showRoleSwitcherModal = false
-                                navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                // Error Alert Dialog for Validation Failures
+                var validationErrorMessage by remember { mutableStateOf<String?>(null) }
+                if (validationErrorMessage != null) {
+                    ErrorState(
+                        title = "Access Error",
+                        description = validationErrorMessage!!,
+                        onRetry = { validationErrorMessage = null }
+                    )
+                }
+
+                // NFC Scanner Dialog
+                if (showNfcScanner) {
+                    val isSessionActive = focusEngine.sessionState == SessionState.ACTIVE
+                    NfcScannerModal(
+                        title = if (isSessionActive) "Tap Card to End Focus" else "Tap Focus Card to Start",
+                        subtitle = if (isSessionActive) "Hold your registered NFC card to unlock apps." else "Hold your card near NFC area to begin restrictions.",
+                        onDismiss = { showNfcScanner = false },
+                        onCardScanned = { card ->
+                            showNfcScanner = false
+                            if (isSessionActive) {
+                                val res = focusEngine.endFocusWithNfc(card.cardId, currentUser)
+                                if (res.isFailure) {
+                                    validationErrorMessage = res.exceptionOrNull()?.message ?: "Only your paired card FC0001 can unlock this session."
+                                }
+                            } else {
+                                val res = focusEngine.startFocusWithNfc(card.cardId, currentUser)
+                                if (res.isSuccess) {
+                                    showActiveFocusScreen = true
+                                } else {
+                                    validationErrorMessage = res.exceptionOrNull()?.message ?: "This card isn't paired to you."
+                                }
                             }
-                        )
+                        }
+                    )
+                }
+
+                // QR Scanner Dialog
+                if (showQrScanner) {
+                    val isSessionActive = focusEngine.sessionState == SessionState.ACTIVE
+                    QrScannerModal(
+                        title = if (isSessionActive) "Scan QR to End Focus" else "Scan Focus QR to Start",
+                        subtitle = if (isSessionActive) "Scan QR to verify and remove restrictions." else "Scan Focus QR to start session.",
+                        onDismiss = { showQrScanner = false },
+                        onQrScanned = { qr ->
+                            showQrScanner = false
+                            if (isSessionActive) {
+                                focusEngine.endFocus(TriggerType.QR, qr.token)
+                            } else {
+                                val res = focusEngine.startFocusWithQr(qr.token, currentUser)
+                                if (res.isSuccess) {
+                                    showActiveFocusScreen = true
+                                } else {
+                                    validationErrorMessage = res.exceptionOrNull()?.message ?: "Invalid or expired Focus QR code."
+                                }
+                            }
+                        }
+                    )
+                }
+
+                // Add Child Modal
+                if (showAddChildModal) {
+                    AddChildModal(onDismiss = { showAddChildModal = false })
+                }
+
+                // Create Policy Modal
+                if (showCreatePolicyModal) {
+                    CreateFocusPolicyScreen(onDismiss = { showCreatePolicyModal = false })
+                }
+
+                // Generated Focus QR Modal
+                generatedFocusQrModal?.let { (qr, childName) ->
+                    QrDisplayModal(
+                        qrToken = qr,
+                        childName = childName,
+                        onDismiss = { generatedFocusQrModal = null }
+                    )
+                }
+
+                // DEV Floating Pill Button (Debug Mode / Role Switcher)
+                if (com.focal.app.config.FocalConfig.showDevRoleSwitcher) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.statusBars)
+                            .padding(top = 8.dp, end = 12.dp),
+                        contentAlignment = Alignment.TopEnd
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF1F1F1F))
+                                .border(1.dp, Color(0xFF555555), RoundedCornerShape(12.dp))
+                                .clickable { showRoleSwitcherModal = true }
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = "DEV",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
                     }
+                }
+
+                // Role Switcher Modal
+                if (showRoleSwitcherModal) {
+                    RoleSwitcherModal(
+                        onDismiss = { showRoleSwitcherModal = false },
+                        onRoleSelected = { role ->
+                            showRoleSwitcherModal = false
+                            navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                        }
+                    )
                 }
             }
         }

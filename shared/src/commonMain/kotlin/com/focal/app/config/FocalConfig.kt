@@ -15,4 +15,16 @@ object FocalConfig {
     // Controls whether parent can program/write blank stickers live in parent "Add Card" flow
     val allowParentBlankCardWriting: Boolean
         get() = isDemoMode
+
+    // Config URLs & Links
+    const val SUPPORT_EMAIL = "support@focal.io"
+    const val WHATSAPP_SUPPORT_URL = "https://wa.me/919876543210?text=Hi%20FOCAL%20Support"
+    const val PRIVACY_POLICY_URL = "https://focal.io/privacy"
+    const val TERMS_OF_SERVICE_URL = "https://focal.io/terms"
+    const val FAQ_URL = "https://focal.io/faq"
+    const val PHYSICAL_CARD_CHECKOUT_URL = "https://focal.io/buy-card"
+    const val ACCOUNT_DELETION_URL = "https://focal.io/delete-account"
+    const val PLAY_STORE_SUBSCRIPTIONS_URL = "https://play.google.com/store/account/subscriptions"
+    const val APP_VERSION_NAME = "v1.2.0"
+    const val APP_BUILD_NUMBER = "Build 108"
 }

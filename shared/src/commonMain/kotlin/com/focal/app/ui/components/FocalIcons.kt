@@ -719,4 +719,6 @@ object FocalIcons {
     val BarChart: ImageVector get() = Chart
     val AlertTriangle: ImageVector get() = Shield
     val Play: ImageVector get() = ArrowForward
+    val Info: ImageVector get() = Shield
+    val Message: ImageVector get() = Bell
 }

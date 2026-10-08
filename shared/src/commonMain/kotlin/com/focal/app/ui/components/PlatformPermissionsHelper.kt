@@ -5,10 +5,22 @@ expect object PlatformPermissionsHelper {
     fun openOverlaySettings()
     fun openUsageAccessSettings()
     fun openNotificationSettings()
+    fun openBatteryOptimizationSettings()
+    fun openExactAlarmSettings()
+    fun openDeviceAdminSettings()
+    fun openNfcSettings()
+    fun openAppDetailsSettings()
+
     fun isAccessibilityEnabled(): Boolean
     fun isOverlayEnabled(): Boolean
     fun isUsageAccessEnabled(): Boolean
     fun isNotificationPermissionGranted(): Boolean
+    fun isBatteryOptimizationDisabled(): Boolean
+    fun isExactAlarmPermissionGranted(): Boolean
+    fun isDeviceAdminActive(): Boolean
+    fun hasNfcHardware(): Boolean
+    fun isNfcEnabled(): Boolean
+
     fun openNewBrowserTab()
     fun getRealDailyScreenTimeMinutes(): Int
 }

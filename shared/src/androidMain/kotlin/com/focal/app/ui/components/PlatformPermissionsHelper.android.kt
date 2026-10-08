@@ -1,60 +1,112 @@
 package com.focal.app.ui.components
 
+import android.app.AlarmManager
+import android.app.AppOpsManager
+import android.app.admin.DeviceAdminReceiver
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.nfc.NfcAdapter
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 
 actual object PlatformPermissionsHelper {
     var appContext: Context? = null
 
-    actual fun openAccessibilitySettings() {
+    private fun safeStartActivity(intent: Intent) {
         try {
             appContext?.let { ctx ->
-                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 ctx.startActivity(intent)
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            // Fallback to general settings page to prevent crashes or loops
+            try {
+                appContext?.let { ctx ->
+                    val fallbackIntent = Intent(Settings.ACTION_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    ctx.startActivity(fallbackIntent)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    actual fun openAccessibilitySettings() {
+        safeStartActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
 
     actual fun openOverlaySettings() {
-        try {
-            appContext?.let { ctx ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    ctx.startActivity(intent)
-                }
-            }
-        } catch (_: Exception) {}
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            safeStartActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${appContext?.packageName}")))
+        } else {
+            safeStartActivity(Intent(Settings.ACTION_SETTINGS))
+        }
     }
 
     actual fun openUsageAccessSettings() {
-        try {
-            appContext?.let { ctx ->
-                val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                ctx.startActivity(intent)
-            }
-        } catch (_: Exception) {}
+        safeStartActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
     }
 
     actual fun openNotificationSettings() {
-        try {
-            appContext?.let { ctx ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                        putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    ctx.startActivity(intent)
-                }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, appContext?.packageName)
             }
-        } catch (_: Exception) {}
+            safeStartActivity(intent)
+        } else {
+            safeStartActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+    }
+
+    actual fun openBatteryOptimizationSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:${appContext?.packageName}")
+            }
+            safeStartActivity(intent)
+        } else {
+            safeStartActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+    }
+
+    actual fun openExactAlarmSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                data = Uri.parse("package:${appContext?.packageName}")
+            }
+            safeStartActivity(intent)
+        } else {
+            safeStartActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+    }
+
+    actual fun openDeviceAdminSettings() {
+        try {
+            val ctx = appContext ?: return
+            val componentName = ComponentName(ctx.packageName, "com.example.myapplication.receiver.FocalDeviceAdminReceiver")
+            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, componentName)
+                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "FOCAL Device Admin stops protection from being removed silently by child.")
+            }
+            safeStartActivity(intent)
+        } catch (_: Exception) {
+            safeStartActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+        }
+    }
+
+    actual fun openNfcSettings() {
+        safeStartActivity(Intent(Settings.ACTION_NFC_SETTINGS))
+    }
+
+    actual fun openAppDetailsSettings() {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.parse("package:${appContext?.packageName}")
+        }
+        safeStartActivity(intent)
     }
 
     actual fun isAccessibilityEnabled(): Boolean {
@@ -86,22 +138,22 @@ actual object PlatformPermissionsHelper {
     actual fun isUsageAccessEnabled(): Boolean {
         return try {
             val ctx = appContext ?: return false
-            val appOps = ctx.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+            val appOps = ctx.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
             val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 appOps.unsafeCheckOpNoThrow(
-                    android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    AppOpsManager.OPSTR_GET_USAGE_STATS,
                     android.os.Process.myUid(),
                     ctx.packageName
                 )
             } else {
                 @Suppress("DEPRECATION")
                 appOps.checkOpNoThrow(
-                    android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    AppOpsManager.OPSTR_GET_USAGE_STATS,
                     android.os.Process.myUid(),
                     ctx.packageName
                 )
             }
-            mode == android.app.AppOpsManager.MODE_ALLOWED
+            mode == AppOpsManager.MODE_ALLOWED
         } catch (_: Exception) {
             false
         }
@@ -123,11 +175,70 @@ actual object PlatformPermissionsHelper {
         }
     }
 
+    actual fun isBatteryOptimizationDisabled(): Boolean {
+        return try {
+            val ctx = appContext ?: return true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+                pm.isIgnoringBatteryOptimizations(ctx.packageName)
+            } else {
+                true
+            }
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    actual fun isExactAlarmPermissionGranted(): Boolean {
+        return try {
+            val ctx = appContext ?: return true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val alarmManager = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                alarmManager.canScheduleExactAlarms()
+            } else {
+                true
+            }
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    actual fun isDeviceAdminActive(): Boolean {
+        return try {
+            val ctx = appContext ?: return false
+            val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val componentName = ComponentName(ctx.packageName, "com.example.myapplication.receiver.FocalDeviceAdminReceiver")
+            dpm.isAdminActive(componentName)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    actual fun hasNfcHardware(): Boolean {
+        return try {
+            val ctx = appContext ?: return false
+            val adapter = NfcAdapter.getDefaultAdapter(ctx)
+            adapter != null
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    actual fun isNfcEnabled(): Boolean {
+        return try {
+            val ctx = appContext ?: return false
+            val adapter = NfcAdapter.getDefaultAdapter(ctx)
+            adapter != null && adapter.isEnabled
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     actual fun openNewBrowserTab() {
         try {
             appContext?.let { ctx ->
                 val intent = Intent(Intent.ACTION_VIEW).apply {
-                    data = android.net.Uri.parse("about:blank")
+                    data = Uri.parse("about:blank")
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 }
                 ctx.startActivity(intent)

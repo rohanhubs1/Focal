@@ -134,21 +134,27 @@ fun OnboardingFlowScreen(
     val slides = listOf(
         OnboardingSlideData(
             badge = "HARDWARE FOCUS",
-            title = "Focus, Made Physical",
-            description = "Tap your FOCAL card or scan a QR code to instantly start a distraction-free session.",
+            title = "Focus, made physical",
+            description = "Tap your FOCAL card to start a distraction-free session.",
             icon = FocalIcons.Nfc
         ),
         OnboardingSlideData(
-            badge = "ANALYTICS",
-            title = "Understand your screen time",
-            description = "Track daily focus hours, screen time metrics, and saved productive time.",
-            icon = FocalIcons.BarChart
+            badge = "APP & WEB BLOCKER",
+            title = "Blocks what distracts you",
+            description = "Apps and websites you choose are blocked during focus.",
+            icon = FocalIcons.Shield
         ),
         OnboardingSlideData(
-            badge = "PROTECTION",
-            title = "Focus without distractions",
-            description = "Custom rules block social media, mobile games, and websites during focus hours.",
-            icon = FocalIcons.Shield
+            badge = "PARENT DASHBOARD",
+            title = "Parents stay in the loop",
+            description = "Schedules, live status and alerts, without hovering.",
+            icon = FocalIcons.Users
+        ),
+        OnboardingSlideData(
+            badge = "PHYSICAL LOCK",
+            title = "Built to stick",
+            description = "Focus ends with the card, not a swipe.",
+            icon = FocalIcons.Lock
         )
     )
 
@@ -308,7 +314,8 @@ private data class OnboardingSlideData(
 // -------------------------------------------------------------
 @Composable
 fun RoleSelectionScreen(
-    onRoleConfirmed: (UserRole) -> Unit
+    onRoleConfirmed: (UserRole) -> Unit,
+    onDirectSignInClick: () -> Unit = {}
 ) {
     var selectedRole by remember { mutableStateOf<UserRole?>(null) }
 
@@ -323,13 +330,13 @@ fun RoleSelectionScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = 80.dp),
+                .padding(bottom = 110.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(24.dp))
 
             Text(
-                text = "Who is using FOCAL?",
+                text = "Who is using FOCAL on this phone?",
                 style = MaterialTheme.typography.headlineMedium.copy(
                     fontWeight = FontWeight.Bold,
                     color = Color.White
@@ -376,7 +383,7 @@ fun RoleSelectionScreen(
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "I'm a Parent / Controller",
+                            text = "I'm a Parent",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -384,7 +391,7 @@ fun RoleSelectionScreen(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Set focus policies, manage children, and pair devices.",
+                            text = "Create policies, manage schedules, and pair child devices.",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = FocalColors.TextSecondary
                             )
@@ -422,7 +429,7 @@ fun RoleSelectionScreen(
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "I'm a Child — pair this phone",
+                            text = "I'm a Child",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -430,7 +437,7 @@ fun RoleSelectionScreen(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Pair with parent's phone to enable managed focus mode.",
+                            text = "Connect to your parent's account to enable focus mode.",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = FocalColors.TextSecondary
                             )
@@ -440,14 +447,39 @@ fun RoleSelectionScreen(
             }
         }
 
-        PrimaryButton(
-            text = "Continue",
-            enabled = selectedRole != null,
-            onClick = { selectedRole?.let { onRoleConfirmed(it) } },
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-        )
+        ) {
+            PrimaryButton(
+                text = "Continue",
+                enabled = selectedRole != null,
+                onClick = { selectedRole?.let { onRoleConfirmed(it) } },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Already have an account? ",
+                    style = MaterialTheme.typography.bodyMedium.copy(color = FocalColors.TextSecondary)
+                )
+                Text(
+                    text = "Sign in",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    modifier = Modifier.clickable { onDirectSignInClick() }
+                )
+            }
+        }
     }
 }
 
@@ -991,14 +1023,30 @@ fun ParentPairChildScreen(
 }
 
 // -------------------------------------------------------------
-// 9. CHILD PAIRING SCREEN (Camera Scanner + 6-digit Code Entry Boxes)
+// 9. CHILD CONNECT / PAIRING SCREEN (Option A: Scan Parent Code / Option B: Show My Code)
 // -------------------------------------------------------------
 @Composable
 fun ChildPairingScreen(
     onPairingSuccess: () -> Unit
 ) {
+    var pairingTab by remember { mutableIntStateOf(0) } // 0: Option A (Scan/Enter parent code), 1: Option B (Show my code)
+
     var pairingCodeDigits by remember { mutableStateOf(listOf("", "", "", "", "", "")) }
     var useCodeEntry by remember { mutableStateOf(false) }
+
+    // Option B State
+    var generatedChildCode by remember { mutableStateOf("839 204") }
+    var secondsRemaining by remember { mutableIntStateOf(600) } // 10 minutes
+
+    LaunchedEffect(pairingTab) {
+        if (pairingTab == 1) {
+            secondsRemaining = 600
+            while (secondsRemaining > 0) {
+                delay(1000)
+                secondsRemaining--
+            }
+        }
+    }
 
     val isCodeComplete = pairingCodeDigits.all { it.isNotBlank() }
 
@@ -1015,10 +1063,10 @@ fun ChildPairingScreen(
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Pair with Parent",
+                text = "Connect to your parent",
                 style = MaterialTheme.typography.headlineMedium.copy(
                     fontWeight = FontWeight.Bold,
                     color = Color.White
@@ -1028,120 +1076,245 @@ fun ChildPairingScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Scan the QR code from your parent's phone or enter the 6-digit pairing code.",
+                text = "Link this phone with your parent's account to enable protection.",
                 style = MaterialTheme.typography.bodyMedium.copy(
                     color = FocalColors.TextSecondary
                 ),
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            if (!useCodeEntry) {
-                // QR Camera Scanner Card Visual
-                FocalCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    padding = 24.dp,
-                    onClick = onPairingSuccess
+            // Two Pairing Mode Tabs: Option A vs Option B
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(FocalColors.Surface)
+                    .padding(4.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (pairingTab == 0) Color.White else Color.Transparent)
+                        .clickable { pairingTab = 0 }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(
-                            modifier = Modifier
-                                .size(160.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color.White)
-                                .padding(14.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = FocalIcons.QrCode,
-                                contentDescription = "Scan QR",
-                                tint = Color.Black,
-                                modifier = Modifier.fillMaxSize()
+                    Text(
+                        text = "Scan Parent's Code",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = if (pairingTab == 0) Color.Black else Color.White
+                        )
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (pairingTab == 1) Color.White else Color.Transparent)
+                        .clickable { pairingTab = 1 }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Show My Code",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = if (pairingTab == 1) Color.Black else Color.White
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            if (pairingTab == 0) {
+                // OPTION A: Scan Parent's QR Code or Enter 6-Digit Code
+                if (!useCodeEntry) {
+                    FocalCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        padding = 24.dp,
+                        onClick = onPairingSuccess
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier
+                                    .size(160.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color.White)
+                                    .padding(14.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = FocalIcons.QrCode,
+                                    contentDescription = "Scan QR",
+                                    tint = Color.Black,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Point camera at parent's QR code",
+                                style = MaterialTheme.typography.labelSmall.copy(color = Color.White, fontWeight = FontWeight.Bold)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "(Tap QR box to simulate successful scan)",
+                                style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, fontSize = 11.sp)
                             )
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Point camera at parent's QR code",
-                            style = MaterialTheme.typography.labelSmall.copy(color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    SecondaryButton(
+                        text = "Enter code instead",
+                        onClick = { useCodeEntry = true },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    Text(
+                        text = "ENTER 6-DIGIT CODE FROM PARENT",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            letterSpacing = 1.5.sp,
+                            color = FocalColors.TextSecondary,
+                            fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        for (i in 0 until 6) {
+                            val digit = pairingCodeDigits.getOrElse(i) { "" }
+                            OutlinedTextField(
+                                value = digit,
+                                onValueChange = { input ->
+                                    val clean = input.takeLast(1)
+                                    val updated = pairingCodeDigits.toMutableList()
+                                    updated[i] = clean
+                                    pairingCodeDigits = updated
+                                },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.headlineMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    textAlign = TextAlign.Center
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(58.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Color.White,
+                                    unfocusedBorderColor = FocalColors.Border,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(28.dp))
+
+                    PrimaryButton(
+                        text = "Confirm & Pair Phone",
+                        enabled = isCodeComplete,
+                        onClick = onPairingSuccess,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    SecondaryButton(
+                        text = "Use Camera QR Scanner Instead",
+                        onClick = { useCodeEntry = false },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            } else {
+                // OPTION B: Show My Code to Parent
+                FocalCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    padding = 20.dp
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "(Tap QR box to simulate successful scan)",
-                            style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, fontSize = 11.sp)
+                            text = "YOUR PAIRING CODE",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                letterSpacing = 1.5.sp,
+                                color = FocalColors.TextSecondary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = generatedChildCode,
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontSize = 36.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 4.sp,
+                                color = Color.White
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        QrCodeView(qrContent = "FOCAL_CHILD_PAIR_$generatedChildCode")
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Waiting for your parent…",
+                                style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        val mins = secondsRemaining / 60
+                        val secs = secondsRemaining % 60
+                        val formattedTime = "${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}"
+
+                        Text(
+                            text = if (secondsRemaining > 0) "Code expires in $formattedTime" else "Code expired",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = if (secondsRemaining > 0) FocalColors.TextSecondary else FocalColors.Danger
+                            )
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 SecondaryButton(
-                    text = "Enter code instead",
-                    onClick = { useCodeEntry = true },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            } else {
-                // 6 Separate Square Digit Boxes
-                Text(
-                    text = "ENTER 6-DIGIT CODE",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        letterSpacing = 1.5.sp,
-                        color = FocalColors.TextSecondary,
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    for (i in 0 until 6) {
-                        val digit = pairingCodeDigits.getOrElse(i) { "" }
-                        OutlinedTextField(
-                            value = digit,
-                            onValueChange = { input ->
-                                val clean = input.takeLast(1)
-                                val updated = pairingCodeDigits.toMutableList()
-                                updated[i] = clean
-                                pairingCodeDigits = updated
-                            },
-                            singleLine = true,
-                            textStyle = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                textAlign = TextAlign.Center
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(58.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color.White,
-                                unfocusedBorderColor = FocalColors.Border,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(28.dp))
-
-                PrimaryButton(
-                    text = "Confirm & Pair Phone",
-                    enabled = isCodeComplete,
-                    onClick = onPairingSuccess,
+                    text = "Generate New Code",
+                    onClick = {
+                        generatedChildCode = "${(100..999).random()} ${(100..999).random()}"
+                        secondsRemaining = 600
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                SecondaryButton(
-                    text = "Use Camera QR Scanner Instead",
-                    onClick = { useCodeEntry = false },
+                PrimaryButton(
+                    text = "Simulate Parent Paired",
+                    onClick = onPairingSuccess,
                     modifier = Modifier.fillMaxWidth()
                 )
             }

@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isParent() {
+      return isAuthenticated() && request.auth.token.role == 'parent';
+    }
+    
+    function isChild() {
+      return isAuthenticated() && request.auth.token.role == 'child';
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.role == 'admin';
+    }
+    
+    function isOwnerParent(parentId) {
+      return isParent() && request.auth.uid == parentId;
+    }
+    
+    function isTargetChild(childId) {
+      return isChild() && request.auth.token.childId == childId;
+    }
+
+    // Parents collection
+    match /parents/{parentId} {
+      allow read, write: if isOwnerParent(parentId) || isAdmin();
+    }
+
+    // Children collection
+    match /children/{childId} {
+      allow read: if isParent() && resource.data.parentId == request.auth.uid || isTargetChild(childId) || isAdmin();
+      allow write: if isParent() && resource.data.parentId == request.auth.uid || isAdmin();
+    }
+
+    // Devices collection
+    match /devices/{deviceId} {
+      allow read, write: if isChild() && request.auth.token.deviceId == deviceId || isAdmin();
+      allow read: if isParent() && resource.data.parentId == request.auth.uid;
+    }
+
+    // Policies & Schedules
+    match /policies/{policyId} {
+      allow read: if isParent() && resource.data.parentId == request.auth.uid || isChild() || isAdmin();
+      allow write: if isParent() && request.auth.uid == request.resource.data.parentId || isAdmin();
+    }
+    
+    match /schedules/{scheduleId} {
+      allow read: if isParent() && resource.data.parentId == request.auth.uid || isChild() || isAdmin();
+      allow write: if isParent() && request.auth.uid == request.resource.data.parentId || isAdmin();
+    }
+
+    // Sessions & Events
+    match /sessions/{sessionId} {
+      allow read, write: if isChild() || isParent() || isAdmin();
+    }
+
+    match /events/{eventId} {
+      allow create: if isChild();
+      allow read: if isParent() || isAdmin();
+    }
+
+    match /usageDaily/{usageId} {
+      allow create, update: if isChild();
+      allow read: if isParent() || isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read, update: if isAuthenticated() && resource.data.recipientUserId == request.auth.uid;
+    }
+
+    // Disallow Direct Writes to System Collections (Server Cloud Functions only)
+    match /cards/{cardId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /pairingCodes/{codeId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /subscriptions/{subId} {
+      allow read: if isParent();
+      allow write: if false;
+    }
+
+    match /adminAudit/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+  }
+}

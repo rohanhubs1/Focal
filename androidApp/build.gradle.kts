@@ -73,3 +73,8 @@ android {
         }
     }
 }
+
+// Conditionally apply Google Services plugin if google-services.json is present
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}

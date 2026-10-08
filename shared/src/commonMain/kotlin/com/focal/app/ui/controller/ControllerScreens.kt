@@ -42,6 +42,7 @@ fun ControllerDashboardScreen(
     val user = repository.currentUser
     val pendingRequests = repository.emergencyRequests.filter { it.status == "PENDING" }
     var showNotificationsModal by remember { mutableStateOf(false) }
+    var showFocusQrModal by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -237,17 +238,17 @@ fun ControllerDashboardScreen(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             FocalCard(
                 modifier = Modifier.weight(1f),
                 onClick = onCreatePolicyClick
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Icon(imageVector = FocalIcons.Shield, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "New Policy", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White))
-                    Text(text = "Create rule set", style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary))
+                    Icon(imageVector = FocalIcons.Shield, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(text = "New Policy", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp))
+                    Text(text = "Create rules", style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, fontSize = 10.sp))
                 }
             }
 
@@ -256,10 +257,22 @@ fun ControllerDashboardScreen(
                 onClick = onAddChildClick
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Icon(imageVector = FocalIcons.Users, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "Pair Child", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White))
-                    Text(text = "Scan pairing code", style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary))
+                    Icon(imageVector = FocalIcons.Users, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(text = "Pair Child", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp))
+                    Text(text = "Scan pairing", style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, fontSize = 10.sp))
+                }
+            }
+
+            FocalCard(
+                modifier = Modifier.weight(1f),
+                onClick = { showFocusQrModal = true }
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    Icon(imageVector = FocalIcons.QrCode, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(text = "Focus QR", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp))
+                    Text(text = "Generate QR", style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, fontSize = 10.sp))
                 }
             }
         }
@@ -268,6 +281,13 @@ fun ControllerDashboardScreen(
     if (showNotificationsModal) {
         NotificationsModal(
             onDismiss = { showNotificationsModal = false },
+            repository = repository
+        )
+    }
+
+    if (showFocusQrModal) {
+        FocusQrGeneratorModal(
+            onDismiss = { showFocusQrModal = false },
             repository = repository
         )
     }
@@ -420,6 +440,7 @@ fun ChildDetailScreen(
     var showEditChildModal by remember { mutableStateOf(false) }
     var showRemoveConfirmSheet by remember { mutableStateOf(false) }
     var showStartFocusSheet by remember { mutableStateOf(false) }
+    var showFocusQrModal by remember { mutableStateOf(false) }
     var showSchedulesModal by remember { mutableStateOf(false) }
     var showPoliciesModal by remember { mutableStateOf(false) }
     var showActivityModal by remember { mutableStateOf(false) }
@@ -540,9 +561,10 @@ fun ChildDetailScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Action Rows: Start Focus Now, Schedules, Policy, Activity, Device & Card
+        // Action Rows: Start Focus Now, Start with QR, Schedules, Policy, Activity, Device & Card
         listOf(
             Triple("Start Focus Now", "Launch focus session remotely", FocalIcons.Play) to { showStartFocusSheet = true },
+            Triple("Start with QR", "Generate single-use focus QR code", FocalIcons.QrCode) to { showFocusQrModal = true },
             Triple("Schedules", "Manage automated routines", FocalIcons.Calendar) to { showSchedulesModal = true },
             Triple("Policy", "Assigned restriction policy", FocalIcons.Shield) to { showPoliciesModal = true },
             Triple("Activity", "Live usage log & attempt history", FocalIcons.Chart) to { showActivityModal = true },
@@ -558,6 +580,14 @@ fun ChildDetailScreen(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
             )
         }
+    }
+
+    if (showFocusQrModal) {
+        FocusQrGeneratorModal(
+            preselectedChildId = child.id,
+            onDismiss = { showFocusQrModal = false },
+            repository = repository
+        )
     }
 
     // Modal: Start Focus Now Sheet (Pick Policy + Duration -> Remote Start)
@@ -2145,53 +2175,87 @@ fun ProgramNewCardModal(
 }
 
 // -------------------------------------------------------------
-// 11. CONTROLLER PROFILE SCREEN & SUBSCRIPTION MODAL
+// 11. CONTROLLER PROFILE SCREEN & ALL PROFILE MODALS
 // -------------------------------------------------------------
 @Composable
 fun ControllerProfileScreen(
     onLogout: () -> Unit,
-    onOpenPermissions: () -> Unit = {},
-    onOpenRoleSwitcher: () -> Unit = {},
-    onOpenNfcManager: () -> Unit = {},
-    onOpenGenerateQr: () -> Unit = {},
-    onCreatePolicyClick: () -> Unit = {},
+    onOpenChildrenTab: (() -> Unit)? = null,
     repository: FocalRepository = FocalRepository.instance
 ) {
     val user = repository.currentUser
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+
+    var showEditNameModal by remember { mutableStateOf(false) }
     var showSubscriptionModal by remember { mutableStateOf(false) }
+    var showPinModal by remember { mutableStateOf(false) }
+    var showNfcManagerModal by remember { mutableStateOf(false) }
     var showNotificationSettingsModal by remember { mutableStateOf(false) }
+    var showAccountAndSecurityModal by remember { mutableStateOf(false) }
+    var showContactSupportModal by remember { mutableStateOf(false) }
+    var showDeleteAccountModal by remember { mutableStateOf(false) }
+    var showComingSoonFeature by remember { mutableStateOf<String?>(null) }
+
+    val subRepo = com.focal.app.data.DemoSubscriptionRepository.instance
+    val subDetails = subRepo.getSubscriptionDetails(user)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .windowInsetsPadding(WindowInsets.systemBars)
             .verticalScroll(rememberScrollState())
-            .padding(20.dp)
+            .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
         Text(
             text = "Controller Profile",
             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Profile Header Card
+        // 1. Profile Header Card
         FocalCard(modifier = Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                InitialsAvatar(name = user.name, size = 56.dp)
-                Spacer(modifier = Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = user.name, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White))
-                    Text(text = user.email, style = MaterialTheme.typography.bodyMedium.copy(color = FocalColors.TextSecondary))
-                    Spacer(modifier = Modifier.height(6.dp))
-                    StatusBadge(text = "FAMILY CONTROLLER", badgeType = BadgeType.ACTIVE)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
+                    InitialsAvatar(name = user.name, size = 52.dp)
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            text = user.name,
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = user.email,
+                            style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        StatusBadge(text = "FAMILY CONTROLLER", badgeType = BadgeType.ACTIVE)
+                    }
                 }
+                Spacer(modifier = Modifier.width(8.dp))
+                SecondaryButton(
+                    text = "Edit",
+                    onClick = { showEditNameModal = true },
+                    modifier = Modifier.widthIn(max = 64.dp)
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Subscription Status Card
+        // 2. FOCAL Premium Family Subscription Card
         FocalCard(
             modifier = Modifier.fillMaxWidth(),
             onClick = { showSubscriptionModal = true }
@@ -2208,11 +2272,18 @@ fun ControllerProfileScreen(
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        StatusBadge(text = "${user.trialDaysRemaining} days trial", badgeType = BadgeType.PENDING)
+                        StatusBadge(
+                            text = subDetails.statusText,
+                            badgeType = when {
+                                subDetails.isExpired -> BadgeType.IDLE
+                                subDetails.paymentFailed -> BadgeType.PENDING
+                                else -> BadgeType.ACTIVE
+                            }
+                        )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Renews Dec 18, 2026 at ₹${user.monthlyPriceInr}/month",
+                        text = if (subDetails.isExpired) "Expired — Tap to renew" else "Renews ${subDetails.renewalDate} at ₹${subDetails.monthlyPriceInr}/mo",
                         style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary)
                     )
                 }
@@ -2220,35 +2291,146 @@ fun ControllerProfileScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
+        // SECTION: FAMILY
         Text(
-            text = "MANAGEMENT & SECURITY",
-            style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
+            text = "FAMILY",
+            style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, letterSpacing = 1.2.sp, fontWeight = FontWeight.Bold)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        FocalListRow(
+            title = "Children (${repository.childrenList.size})",
+            subtitle = "Manage paired child devices & profiles",
+            icon = FocalIcons.Users,
+            onClick = { onOpenChildrenTab?.invoke() },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        )
+        FocalListRow(
+            title = "Parent PIN",
+            subtitle = if (repository.parentPin.isNotBlank()) "PIN set ✓ (Tap to change)" else "Set 4–6 digit security PIN",
+            icon = FocalIcons.Lock,
+            onClick = { showPinModal = true },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        )
+        FocalListRow(
+            title = "Invite Another Parent",
+            subtitle = "Co-management & family sharing",
+            icon = FocalIcons.Add,
+            onClick = { showComingSoonFeature = "Parent Co-management" },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // SECTION: CARDS
+        Text(
+            text = "CARDS",
+            style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, letterSpacing = 1.2.sp, fontWeight = FontWeight.Bold)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        FocalListRow(
+            title = "NFC Cards",
+            subtitle = "${repository.nfcCards.size} cards registered • Manage hardware tags",
+            icon = FocalIcons.Nfc,
+            onClick = { showNfcManagerModal = true },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // SECTION: SETTINGS
+        Text(
+            text = "SETTINGS",
+            style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, letterSpacing = 1.2.sp, fontWeight = FontWeight.Bold)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        FocalListRow(
+            title = "Notifications",
+            subtitle = "Emergency alerts & session updates",
+            icon = FocalIcons.Bell,
+            onClick = { showNotificationSettingsModal = true },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        )
+        FocalListRow(
+            title = "Account & Security",
+            subtitle = "Name, email, password & security",
+            icon = FocalIcons.Settings,
+            onClick = { showAccountAndSecurityModal = true },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // SECTION: SUPPORT
+        Text(
+            text = "SUPPORT",
+            style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, letterSpacing = 1.2.sp, fontWeight = FontWeight.Bold)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        FocalListRow(
+            title = "Help & FAQ",
+            subtitle = "Setup guides & troubleshooting",
+            icon = FocalIcons.Info,
+            onClick = { uriHandler.openUri(com.focal.app.config.FocalConfig.FAQ_URL) },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        )
+        FocalListRow(
+            title = "Contact Support",
+            subtitle = "Email support or WhatsApp chat",
+            icon = FocalIcons.Message,
+            onClick = { showContactSupportModal = true },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        )
+        FocalListRow(
+            title = "Privacy Policy",
+            subtitle = "Data handling & privacy guidelines",
+            icon = FocalIcons.Shield,
+            onClick = { uriHandler.openUri(com.focal.app.config.FocalConfig.PRIVACY_POLICY_URL) },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        )
+        FocalListRow(
+            title = "Terms of Service",
+            subtitle = "FOCAL platform terms of use",
+            icon = FocalIcons.Check,
+            onClick = { uriHandler.openUri(com.focal.app.config.FocalConfig.TERMS_OF_SERVICE_URL) },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        )
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // FOOTER ACTIONS
+        SecondaryButton(
+            text = "Sign Out",
+            onClick = onLogout,
+            modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(10.dp))
+        DestructiveButton(
+            text = "Delete Account",
+            onClick = { showDeleteAccountModal = true },
+            modifier = Modifier.fillMaxWidth()
+        )
 
-        listOf(
-            Triple("NFC Cards Manager", "Pair, format & assign NFC cards", FocalIcons.Nfc) to onOpenNfcManager,
-            Triple("Generate Focus QR Token", "Create single-use access QR", FocalIcons.QrCode) to onOpenGenerateQr,
-            Triple("Create Focus Policy", "Rules for apps & websites", FocalIcons.Shield) to onCreatePolicyClick,
-            Triple("Notification Settings", "Toggles for emergency & protection alerts", FocalIcons.Bell) to { showNotificationSettingsModal = true },
-            Triple("Device Admin & Permissions", "System usage permissions", FocalIcons.Settings) to onOpenPermissions
-        ).forEach { (item, onClickAction) ->
-            val (title, subtitle, icon) = item
-            FocalListRow(
-                title = title,
-                subtitle = subtitle,
-                icon = icon,
-                trailingIcon = FocalIcons.ArrowForward,
-                onClick = onClickAction,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            )
-        }
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Text(
+            text = "${com.focal.app.config.FocalConfig.APP_VERSION_NAME} (${com.focal.app.config.FocalConfig.APP_BUILD_NUMBER})",
+            style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary),
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
+    }
 
-        DestructiveButton(text = "Sign Out", onClick = onLogout, modifier = Modifier.fillMaxWidth())
+    // MODAL DIALOGS
+    if (showEditNameModal) {
+        EditProfileNameModal(
+            onDismiss = { showEditNameModal = false },
+            repository = repository
+        )
     }
 
     if (showSubscriptionModal) {
@@ -2258,25 +2440,74 @@ fun ControllerProfileScreen(
         )
     }
 
+    if (showPinModal) {
+        ParentPinModal(
+            onDismiss = { showPinModal = false },
+            repository = repository
+        )
+    }
+
+    if (showNfcManagerModal) {
+        NfcCardsManagerModal(
+            onDismiss = { showNfcManagerModal = false },
+            repository = repository
+        )
+    }
+
     if (showNotificationSettingsModal) {
         NotificationSettingsModal(
             onDismiss = { showNotificationSettingsModal = false }
         )
     }
+
+    if (showAccountAndSecurityModal) {
+        AccountAndSecurityModal(
+            onDismiss = { showAccountAndSecurityModal = false },
+            repository = repository
+        )
+    }
+
+    if (showContactSupportModal) {
+        ContactSupportModal(
+            onDismiss = { showContactSupportModal = false }
+        )
+    }
+
+    if (showDeleteAccountModal) {
+        DeleteAccountConfirmationModal(
+            onDismiss = { showDeleteAccountModal = false },
+            onDeleted = onLogout,
+            repository = repository
+        )
+    }
+
+    showComingSoonFeature?.let { feature ->
+        ComingSoonModal(
+            featureName = feature,
+            onDismiss = { showComingSoonFeature = null }
+        )
+    }
 }
 
+// -------------------------------------------------------------
+// 12. SUBSCRIPTION & BILLING MODAL
+// -------------------------------------------------------------
 @Composable
 fun SubscriptionModal(
     onDismiss: () -> Unit,
     repository: FocalRepository = FocalRepository.instance
 ) {
     val user = repository.currentUser
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val subRepo = com.focal.app.data.DemoSubscriptionRepository.instance
+    val subDetails = subRepo.getSubscriptionDetails(user)
+    var showBillingHistory by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         FocalCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f)
+                .fillMaxHeight(0.9f)
                 .padding(4.dp)
         ) {
             Column(
@@ -2300,20 +2531,47 @@ fun SubscriptionModal(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Trial Status Banner
+                if (subDetails.isExpired) {
+                    FocalCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = FocalColors.Danger.copy(alpha = 0.15f),
+                        borderColor = FocalColors.Danger
+                    ) {
+                        Column {
+                            Text(
+                                text = "Subscription Expired",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = FocalColors.Danger)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Renew to keep managing policies, remote start, and QR codes. Child devices continue enforcing saved rules offline.",
+                                style = MaterialTheme.typography.bodySmall.copy(color = Color.White)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
                 FocalCard(
                     modifier = Modifier.fillMaxWidth(),
                     backgroundColor = FocalColors.Surface
                 ) {
                     Column {
-                        StatusBadge(text = "TRIAL ACTIVE", badgeType = BadgeType.ACTIVE)
+                        StatusBadge(
+                            text = subDetails.statusText,
+                            badgeType = when {
+                                subDetails.isExpired -> BadgeType.IDLE
+                                subDetails.paymentFailed -> BadgeType.PENDING
+                                else -> BadgeType.ACTIVE
+                            }
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "${user.trialDaysRemaining} Days Remaining in Free Trial",
+                            text = "₹${subDetails.monthlyPriceInr} / month after 3-month trial",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
                         )
                         Text(
-                            text = "Next billing date: ${user.nextBillingDate} at ₹${user.monthlyPriceInr}/mo",
+                            text = "Next billing date: ${subDetails.renewalDate}",
                             style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary)
                         )
                     }
@@ -2322,18 +2580,18 @@ fun SubscriptionModal(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 Text(
-                    text = "PLAN INCLUDES",
+                    text = "INCLUDED IN FAMILY PLAN",
                     style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
                 listOf(
-                    "Unlimited child devices pairing",
-                    "Custom NFC hardware card programming & token writing",
-                    "Remote Focus QR token generation",
-                    "Real-time heartbeat & protection monitoring",
+                    "Up to 5 child profiles & paired devices",
+                    "Unlimited focus policies & automated schedules",
+                    "Real-time protection & device heartbeat status",
                     "Emergency exit request approval workflow",
-                    "Comprehensive usage insights & daily focus charts"
+                    "Focus activity reports & screen time charts",
+                    "FOCAL physical NFC card tap support"
                 ).forEach { feature ->
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -2356,18 +2614,526 @@ fun SubscriptionModal(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(28.dp))
+                Spacer(modifier = Modifier.height(20.dp))
+
+                FocalCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    borderColor = Color(0xFF444444)
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(imageVector = FocalIcons.Nfc, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Physical FOCAL NFC Card",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                                )
+                                Text(
+                                    text = "One-time purchase · ₹999 / card",
+                                    style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        SecondaryButton(
+                            text = "Get a FOCAL Card",
+                            onClick = { uriHandler.openUri(com.focal.app.config.FocalConfig.PHYSICAL_CARD_CHECKOUT_URL) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
 
                 PrimaryButton(
-                    text = "Manage Subscription",
-                    onClick = onDismiss,
+                    text = if (subDetails.isExpired) "Renew Subscription" else "Manage Subscription",
+                    onClick = { uriHandler.openUri(com.focal.app.config.FocalConfig.PLAY_STORE_SUBSCRIPTIONS_URL) },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SecondaryButton(
+                        text = "Restore Purchases",
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f)
+                    )
+                    SecondaryButton(
+                        text = "Billing History",
+                        onClick = { showBillingHistory = true },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+
+    if (showBillingHistory) {
+        Dialog(onDismissRequest = { showBillingHistory = false }) {
+            FocalCard(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Billing History",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                        )
+                        IconButton(onClick = { showBillingHistory = false }) {
+                            Icon(imageVector = FocalIcons.Close, contentDescription = "Close", tint = Color.White)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    listOf(
+                        "2026-09-18" to ("3-Month Free Trial Started" to "₹0"),
+                        "2026-12-18" to ("FOCAL Premium Family (Upcoming)" to "₹299")
+                    ).forEach { (date, detail) ->
+                        val (desc, amt) = detail
+                        FocalListRow(
+                            title = desc,
+                            subtitle = date,
+                            trailingText = amt,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(20.dp))
+                    PrimaryButton(text = "Close", onClick = { showBillingHistory = false }, modifier = Modifier.fillMaxWidth())
+                }
             }
         }
     }
 }
 
+// -------------------------------------------------------------
+// 13. NFC CARDS MANAGER MODAL
+// -------------------------------------------------------------
+@Composable
+fun NfcCardsManagerModal(
+    onDismiss: () -> Unit,
+    repository: FocalRepository = FocalRepository.instance
+) {
+    var showAddCardModal by remember { mutableStateOf(false) }
+    var cardToRevoke by remember { mutableStateOf<FocusCard?>(null) }
+    var cardToAssign by remember { mutableStateOf<FocusCard?>(null) }
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+
+    Dialog(onDismissRequest = onDismiss) {
+        FocalCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.88f)
+                .padding(4.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "NFC Cards Manager",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = FocalIcons.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (repository.nfcCards.isEmpty()) {
+                    FocalCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = FocalColors.Surface
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
+                        ) {
+                            Icon(imageVector = FocalIcons.Nfc, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "No Cards Registered Yet",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Tap 'Add Card' to pair a physical FOCAL card using phone NFC or ACR122U USB reader.",
+                                style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary, textAlign = TextAlign.Center)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                } else {
+                    repository.nfcCards.forEach { card ->
+                        val assignedChild = repository.childrenList.find { it.id == card.assignedChildId }
+                        FocalCard(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            backgroundColor = FocalColors.Surface
+                        ) {
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(imageVector = FocalIcons.Nfc, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(
+                                                text = card.cardId,
+                                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                                            )
+                                            Text(
+                                                text = "Token: ••••${card.token.takeLast(4)} • ${if (assignedChild != null) "Assigned to ${assignedChild.name}" else "Not assigned"}",
+                                                style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary)
+                                            )
+                                        }
+                                    }
+                                    StatusBadge(
+                                        text = card.status.name,
+                                        badgeType = if (card.status == CardStatus.DEACTIVATED || card.status == CardStatus.REVOKED) BadgeType.IDLE else BadgeType.ACTIVE
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    SecondaryButton(
+                                        text = if (assignedChild != null) "Reassign" else "Assign",
+                                        onClick = { cardToAssign = card },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (assignedChild != null) {
+                                        SecondaryButton(
+                                            text = "Unpair",
+                                            onClick = { repository.unpairCardFromChild(card.cardId) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    DestructiveButton(
+                                        text = "Revoke",
+                                        onClick = { cardToRevoke = card },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                PrimaryButton(
+                    text = "Add Card",
+                    onClick = { showAddCardModal = true },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                SecondaryButton(
+                    text = "Get a FOCAL Card (₹999)",
+                    onClick = { uriHandler.openUri(com.focal.app.config.FocalConfig.PHYSICAL_CARD_CHECKOUT_URL) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+
+    if (showAddCardModal) {
+        AddCardFlowModal(
+            onDismiss = { showAddCardModal = false },
+            repository = repository
+        )
+    }
+
+    if (cardToRevoke != null) {
+        Dialog(onDismissRequest = { cardToRevoke = null }) {
+            FocalCard(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+                Column {
+                    Text(
+                        text = "Revoke Card ${cardToRevoke!!.cardId}?",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "This will permanently deactivate the NFC tag token. The card will no longer unlock focus sessions.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary)
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DestructiveButton(
+                            text = "Revoke Card",
+                            onClick = {
+                                repository.adminRevokeCard(cardToRevoke!!.cardId)
+                                cardToRevoke = null
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        SecondaryButton(
+                            text = "Cancel",
+                            onClick = { cardToRevoke = null },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (cardToAssign != null) {
+        Dialog(onDismissRequest = { cardToAssign = null }) {
+            FocalCard(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+                Column {
+                    Text(
+                        text = "Assign Card ${cardToAssign!!.cardId}",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    if (repository.childrenList.isEmpty()) {
+                        Text("No children profiles found.", style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary))
+                    } else {
+                        repository.childrenList.forEach { child ->
+                            FocalListRow(
+                                title = child.name,
+                                subtitle = "Assign card to ${child.name}",
+                                icon = FocalIcons.Users,
+                                onClick = {
+                                    repository.programAndAssignNfcCard(cardToAssign!!.cardId, child.id)
+                                    cardToAssign = null
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    PrimaryButton(text = "Cancel", onClick = { cardToAssign = null }, modifier = Modifier.fillMaxWidth())
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// 14. FOCUS QR GENERATOR MODAL
+// -------------------------------------------------------------
+@Composable
+fun FocusQrGeneratorModal(
+    preselectedChildId: String? = null,
+    onDismiss: () -> Unit,
+    repository: FocalRepository = FocalRepository.instance
+) {
+    var selectedChildId by remember { mutableStateOf(preselectedChildId ?: repository.childrenList.firstOrNull()?.id ?: "") }
+    var selectedPolicyId by remember { mutableStateOf(repository.policies.firstOrNull()?.id ?: "") }
+    var selectedDuration by remember { mutableIntStateOf(60) }
+    var generatedQr by remember { mutableStateOf<QrToken?>(null) }
+    var simulatedScanSuccess by remember { mutableStateOf(false) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        FocalCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.9f)
+                .padding(4.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Generate Focus QR",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = FocalIcons.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (generatedQr == null) {
+                    Text(
+                        text = "SELECT CHILD",
+                        style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    repository.childrenList.forEach { child ->
+                        val isSel = child.id == selectedChildId
+                        FocalCard(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            backgroundColor = if (isSel) Color(0xFF1E1E1E) else FocalColors.Surface,
+                            borderColor = if (isSel) Color.White else FocalColors.Border,
+                            onClick = { selectedChildId = child.id }
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                InitialsAvatar(name = child.name, size = 32.dp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(text = child.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "SELECT POLICY",
+                        style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    repository.policies.forEach { policy ->
+                        val isSel = policy.id == selectedPolicyId
+                        FocalCard(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            backgroundColor = if (isSel) Color(0xFF1E1E1E) else FocalColors.Surface,
+                            borderColor = if (isSel) Color.White else FocalColors.Border,
+                            onClick = { selectedPolicyId = policy.id }
+                        ) {
+                            Text(text = policy.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "SESSION DURATION",
+                        style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(30, 60, 90, 120).forEach { mins ->
+                            val isSel = selectedDuration == mins
+                            SecondaryButton(
+                                text = "${mins}m",
+                                onClick = { selectedDuration = mins },
+                                borderColor = if (isSel) Color.White else FocalColors.BorderSecondary,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    PrimaryButton(
+                        text = "Generate Focus QR",
+                        onClick = {
+                            val policy = repository.policies.find { it.id == selectedPolicyId }
+                            val qr = repository.generateFocusQr(
+                                childId = selectedChildId,
+                                policyId = selectedPolicyId,
+                                policyTitle = "${policy?.name ?: "Focus"} (${selectedDuration / 60}h)",
+                                durationMinutes = selectedDuration
+                            )
+                            generatedQr = qr
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    val child = repository.childrenList.find { it.id == generatedQr!!.childId }
+                    val fallbackCode = generatedQr!!.token.takeLast(6)
+
+                    if (simulatedScanSuccess) {
+                        FocalCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            backgroundColor = FocalColors.Surface,
+                            borderColor = Color.White
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
+                                Box(
+                                    modifier = Modifier.size(56.dp).clip(CircleShape).background(Color.White),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(imageVector = FocalIcons.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(32.dp))
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "${child?.name ?: "Child"} started focus ✓",
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Focus policy activated on target device.",
+                                    style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(20.dp))
+                        PrimaryButton(text = "Done", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = "Scan QR on ${child?.name ?: "Child"}'s Phone",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            QrCodeView(qrContent = generatedQr!!.token, size = 180.dp)
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Text(
+                                text = "FALLBACK 6-DIGIT CODE",
+                                style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, letterSpacing = 1.sp)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = fallbackCode,
+                                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = 4.sp)
+                            )
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            SecondaryButton(
+                                text = "Regenerate QR",
+                                onClick = {
+                                    val policy = repository.policies.find { it.id == selectedPolicyId }
+                                    generatedQr = repository.generateFocusQr(
+                                        childId = selectedChildId,
+                                        policyId = selectedPolicyId,
+                                        policyTitle = "${policy?.name ?: "Focus"} (${selectedDuration / 60}h)",
+                                        durationMinutes = selectedDuration
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            PrimaryButton(
+                                text = "Simulate Child Scan",
+                                onClick = {
+                                    simulatedScanSuccess = true
+                                    val cIdx = repository.childrenList.indexOfFirst { it.id == selectedChildId }
+                                    if (cIdx >= 0) {
+                                        repository.childrenList[cIdx] = repository.childrenList[cIdx].copy(isFocusing = true, remainingMinutes = selectedDuration)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// 15. NOTIFICATION SETTINGS MODAL
+// -------------------------------------------------------------
 @Composable
 fun NotificationSettingsModal(
     onDismiss: () -> Unit
@@ -2376,10 +3142,16 @@ fun NotificationSettingsModal(
     var sessionCompletedNotif by remember { mutableStateOf(true) }
     var deviceOfflineNotif by remember { mutableStateOf(true) }
     var scheduleNotif by remember { mutableStateOf(true) }
+    val isSystemPermissionGranted = PlatformPermissionsHelper.isNotificationPermissionGranted()
 
     Dialog(onDismissRequest = onDismiss) {
-        FocalCard(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
-            Column {
+        FocalCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.88f)
+                .padding(4.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -2394,55 +3166,425 @@ fun NotificationSettingsModal(
                     }
                 }
 
+                Spacer(modifier = Modifier.height(14.dp))
+
+                if (!isSystemPermissionGranted) {
+                    FocalCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = FocalColors.Danger.copy(alpha = 0.15f),
+                        borderColor = FocalColors.Danger
+                    ) {
+                        Column {
+                            Text(
+                                text = "You won't get alerts",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = FocalColors.Danger)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "System notification permission is currently disabled on this phone.",
+                                style = MaterialTheme.typography.bodySmall.copy(color = Color.White)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SecondaryButton(
+                                text = "Open Settings",
+                                onClick = { PlatformPermissionsHelper.openNotificationSettings() },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = "SAFETY ALERTS (LOCKED ON)",
+                        style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Safety alerts cannot be turned off to guarantee parent protection.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextMuted)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    FocalListRow(
+                        title = "Emergency Exit Requests",
+                        subtitle = "Instant alert when child requests early session exit",
+                        icon = FocalIcons.Lock,
+                        trailingText = "LOCKED ON",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    FocalListRow(
+                        title = "Protection Off Alerts",
+                        subtitle = "Alert when accessibility or permissions are tampered",
+                        icon = FocalIcons.Lock,
+                        trailingText = "LOCKED ON",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    FocalListRow(
+                        title = "Phone Offline Alerts",
+                        subtitle = "Alert when child device loses signal >30m",
+                        icon = FocalIcons.Lock,
+                        trailingText = "LOCKED ON",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Text(
+                        text = "UPDATE ALERTS (TOGGLABLE)",
+                        style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    FocalListRow(
+                        title = "Session Started Alerts",
+                        subtitle = "Notify when focus session begins",
+                        trailingToggle = sessionStartedNotif,
+                        onToggleChange = { sessionStartedNotif = it },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    FocalListRow(
+                        title = "Session Completed Alerts",
+                        subtitle = "Summary when focus session completes",
+                        trailingToggle = sessionCompletedNotif,
+                        onToggleChange = { sessionCompletedNotif = it },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    FocalListRow(
+                        title = "Schedule Routine Triggers",
+                        subtitle = "Notification when automated schedule runs",
+                        trailingToggle = scheduleNotif,
+                        onToggleChange = { scheduleNotif = it },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    FocalListRow(
+                        title = "Device Offline Updates",
+                        subtitle = "Routine connectivity reports",
+                        trailingToggle = deviceOfflineNotif,
+                        onToggleChange = { deviceOfflineNotif = it },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Locked Always-On Alerts
-                FocalListRow(
-                    title = "Emergency Exit Requests",
-                    subtitle = "Always ON (Mandatory safety alert)",
-                    trailingText = "LOCKED ON",
-                    modifier = Modifier.fillMaxWidth()
-                )
-                FocalListRow(
-                    title = "Protection Off Alerts",
-                    subtitle = "Always ON (Mandatory anti-tamper alert)",
-                    trailingText = "LOCKED ON",
-                    modifier = Modifier.fillMaxWidth()
-                )
+                PrimaryButton(text = "Save Preferences", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
 
-                // Optional Toggleable Alerts
+// -------------------------------------------------------------
+// 16. ACCOUNT & SECURITY MODALS
+// -------------------------------------------------------------
+@Composable
+fun AccountAndSecurityModal(
+    onDismiss: () -> Unit,
+    repository: FocalRepository = FocalRepository.instance
+) {
+    var showEditNameModal by remember { mutableStateOf(false) }
+    var showChangeEmailModal by remember { mutableStateOf(false) }
+    var showChangePasswordModal by remember { mutableStateOf(false) }
+    var showPinModal by remember { mutableStateOf(false) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        FocalCard(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Account & Security",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = FocalIcons.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
                 FocalListRow(
-                    title = "Session Started Alerts",
-                    subtitle = "Notify when child starts a focus session",
-                    trailingToggle = sessionStartedNotif,
-                    onToggleChange = { sessionStartedNotif = it },
-                    modifier = Modifier.fillMaxWidth()
+                    title = "Parent Name",
+                    subtitle = repository.currentUser.name,
+                    icon = FocalIcons.Users,
+                    onClick = { showEditNameModal = true },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
                 )
                 FocalListRow(
-                    title = "Session Completed Alerts",
-                    subtitle = "Summary when focus session ends",
-                    trailingToggle = sessionCompletedNotif,
-                    onToggleChange = { sessionCompletedNotif = it },
-                    modifier = Modifier.fillMaxWidth()
+                    title = "Account Email",
+                    subtitle = repository.currentUser.email,
+                    icon = FocalIcons.Message,
+                    onClick = { showChangeEmailModal = true },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
                 )
                 FocalListRow(
-                    title = "Device Offline Alerts",
-                    subtitle = "Notification when phone loses signal >30m",
-                    trailingToggle = deviceOfflineNotif,
-                    onToggleChange = { deviceOfflineNotif = it },
-                    modifier = Modifier.fillMaxWidth()
+                    title = "Account Password",
+                    subtitle = "••••••••••••",
+                    icon = FocalIcons.Lock,
+                    onClick = { showChangePasswordModal = true },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
                 )
                 FocalListRow(
-                    title = "Schedule Routine Triggers",
-                    subtitle = "Notification when automated schedule runs",
-                    trailingToggle = scheduleNotif,
-                    onToggleChange = { scheduleNotif = it },
-                    modifier = Modifier.fillMaxWidth()
+                    title = "Parent Authorization PIN",
+                    subtitle = if (repository.parentPin.isNotBlank()) "PIN set ✓" else "Set 4–6 digit security PIN",
+                    icon = FocalIcons.Settings,
+                    onClick = { showPinModal = true },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                PrimaryButton(text = "Save Preferences", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
+                PrimaryButton(text = "Done", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
+
+    if (showEditNameModal) EditProfileNameModal(onDismiss = { showEditNameModal = false }, repository = repository)
+    if (showChangeEmailModal) ChangeEmailModal(onDismiss = { showChangeEmailModal = false }, repository = repository)
+    if (showChangePasswordModal) ChangePasswordModal(onDismiss = { showChangePasswordModal = false })
+    if (showPinModal) ParentPinModal(onDismiss = { showPinModal = false }, repository = repository)
+}
+
+@Composable
+fun EditProfileNameModal(
+    onDismiss: () -> Unit,
+    repository: FocalRepository = FocalRepository.instance
+) {
+    var nameInput by remember { mutableStateOf(repository.currentUser.name) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        FocalCard(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+            Column {
+                Text(text = "Edit Profile Name", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White))
+                Spacer(modifier = Modifier.height(16.dp))
+                FocalTextField(value = nameInput, onValueChange = { nameInput = it }, label = "Full Name")
+                Spacer(modifier = Modifier.height(24.dp))
+                PrimaryButton(
+                    text = "Save Name",
+                    onClick = {
+                        if (nameInput.isNotBlank()) {
+                            repository.updateParentName(nameInput.trim())
+                        }
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ChangeEmailModal(
+    onDismiss: () -> Unit,
+    repository: FocalRepository = FocalRepository.instance
+) {
+    var currentPassword by remember { mutableStateOf("") }
+    var newEmail by remember { mutableStateOf(repository.currentUser.email) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        FocalCard(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+            Column {
+                Text(text = "Change Account Email", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White))
+                Spacer(modifier = Modifier.height(16.dp))
+                FocalTextField(value = currentPassword, onValueChange = { currentPassword = it }, label = "Current Password", isPassword = true)
+                Spacer(modifier = Modifier.height(12.dp))
+                FocalTextField(value = newEmail, onValueChange = { newEmail = it }, label = "New Email Address")
+                Spacer(modifier = Modifier.height(24.dp))
+                PrimaryButton(
+                    text = "Update Email",
+                    onClick = {
+                        if (newEmail.isNotBlank()) {
+                            repository.updateParentEmail(newEmail.trim())
+                        }
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ChangePasswordModal(
+    onDismiss: () -> Unit
+) {
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        FocalCard(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+            Column {
+                Text(text = "Change Password", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White))
+                Spacer(modifier = Modifier.height(16.dp))
+                FocalTextField(value = currentPassword, onValueChange = { currentPassword = it }, label = "Current Password", isPassword = true)
+                Spacer(modifier = Modifier.height(12.dp))
+                FocalTextField(value = newPassword, onValueChange = { newPassword = it }, label = "New Password", isPassword = true)
+                Spacer(modifier = Modifier.height(12.dp))
+                FocalTextField(value = confirmPassword, onValueChange = { confirmPassword = it }, label = "Confirm New Password", isPassword = true)
+                Spacer(modifier = Modifier.height(24.dp))
+                PrimaryButton(text = "Save New Password", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
+
+@Composable
+fun ParentPinModal(
+    onDismiss: () -> Unit,
+    repository: FocalRepository = FocalRepository.instance
+) {
+    var pinInput by remember { mutableStateOf(repository.parentPin) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        FocalCard(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+            Column {
+                Text(text = "Parent Authorization PIN", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White))
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = "Set a 4–6 digit PIN used to authorize emergency exit approvals or override settings on child device.", style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary))
+                Spacer(modifier = Modifier.height(16.dp))
+                FocalTextField(value = pinInput, onValueChange = { pinInput = it }, label = "Security PIN", isPassword = true)
+                Spacer(modifier = Modifier.height(24.dp))
+                PrimaryButton(
+                    text = "Save Security PIN",
+                    onClick = {
+                        repository.updateParentPin(pinInput)
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// 17. DELETE ACCOUNT CONFIRMATION MODAL
+// -------------------------------------------------------------
+@Composable
+fun DeleteAccountConfirmationModal(
+    onDismiss: () -> Unit,
+    onDeleted: () -> Unit,
+    repository: FocalRepository = FocalRepository.instance
+) {
+    var confirmPassword by remember { mutableStateOf("") }
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+
+    Dialog(onDismissRequest = onDismiss) {
+        FocalCard(
+            modifier = Modifier.fillMaxWidth().padding(4.dp),
+            borderColor = FocalColors.Danger
+        ) {
+            Column {
+                Text(
+                    text = "Delete FOCAL Account?",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = FocalColors.Danger)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "Deleting your account will permanently purge all paired child profiles, focus policies, schedules, and historical telemetry data.",
+                    style = MaterialTheme.typography.bodySmall.copy(color = Color.White)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                FocalCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = FocalColors.Surface
+                ) {
+                    Text(
+                        text = "⚠️ STORE SUBSCRIPTION NOTICE: Deleting your FOCAL account does NOT automatically cancel your Google Play / App Store subscription. You must cancel active subscriptions in the store.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SecondaryButton(
+                        text = "Manage Store Subscription",
+                        onClick = { uriHandler.openUri(com.focal.app.config.FocalConfig.PLAY_STORE_SUBSCRIPTIONS_URL) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                FocalTextField(value = confirmPassword, onValueChange = { confirmPassword = it }, label = "Re-enter Password to Confirm", isPassword = true)
+
+                Spacer(modifier = Modifier.height(24.dp))
+                DestructiveButton(
+                    text = "Permanently Delete Account",
+                    onClick = {
+                        repository.deleteParentAccount()
+                        onDismiss()
+                        onDeleted()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                SecondaryButton(text = "Cancel", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Web deletion policy: ${com.focal.app.config.FocalConfig.ACCOUNT_DELETION_URL}",
+                    style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextMuted, fontSize = 10.sp),
+                    modifier = Modifier.clickable { uriHandler.openUri(com.focal.app.config.FocalConfig.ACCOUNT_DELETION_URL) }
+                )
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// 18. CONTACT SUPPORT MODAL
+// -------------------------------------------------------------
+@Composable
+fun ContactSupportModal(
+    onDismiss: () -> Unit
+) {
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+
+    Dialog(onDismissRequest = onDismiss) {
+        FocalCard(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Contact FOCAL Support",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = FocalIcons.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                FocalListRow(
+                    title = "Email Support",
+                    subtitle = com.focal.app.config.FocalConfig.SUPPORT_EMAIL,
+                    icon = FocalIcons.Message,
+                    onClick = { uriHandler.openUri("mailto:${com.focal.app.config.FocalConfig.SUPPORT_EMAIL}") },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                )
+
+                FocalListRow(
+                    title = "WhatsApp Support Chat",
+                    subtitle = "Direct messaging support line",
+                    icon = FocalIcons.Message,
+                    onClick = { uriHandler.openUri(com.focal.app.config.FocalConfig.WHATSAPP_SUPPORT_URL) },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+                PrimaryButton(text = "Close", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
             }
         }
     }

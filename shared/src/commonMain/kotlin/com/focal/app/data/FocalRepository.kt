@@ -56,6 +56,34 @@ class FocalRepository private constructor() {
         )
     )
 
+    var parentPin by mutableStateOf("1234")
+
+    fun updateParentName(newName: String) {
+        controllerUser = controllerUser.copy(name = newName)
+        if (currentUser.id == controllerUser.id) {
+            currentUser = currentUser.copy(name = newName)
+        }
+    }
+
+    fun updateParentEmail(newEmail: String) {
+        controllerUser = controllerUser.copy(email = newEmail)
+        if (currentUser.id == controllerUser.id) {
+            currentUser = currentUser.copy(email = newEmail)
+        }
+    }
+
+    fun updateParentPin(newPin: String) {
+        parentPin = newPin
+    }
+
+    fun deleteParentAccount() {
+        childrenList.clear()
+        nfcCards.clear()
+        policies.clear()
+        schedules.clear()
+        notifications.clear()
+    }
+
     val childRahul = User(
         id = "user_rahul",
         name = "Rahul Sharma",
