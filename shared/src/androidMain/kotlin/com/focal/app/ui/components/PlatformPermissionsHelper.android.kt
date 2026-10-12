@@ -12,17 +12,63 @@ import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+
 
 actual object PlatformPermissionsHelper {
     var appContext: Context? = null
+    var setupPageAllowedUntilMs: Long = 0L
+    var isAccessibilityServiceConnected: Boolean = false
 
-    private fun safeStartActivity(intent: Intent) {
+    actual fun markSetupPageOpened() {
+        val wasActive = isSetupPageGraceActive()
+        setupPageAllowedUntilMs = System.currentTimeMillis() + 3 * 60 * 1000L // 3 minutes grace
+        if (!wasActive) {
+            Log.d("FOCAL_PERM_LOG", "FIX_ALLOWANCE_START: Fix-button clicked, 3-minute grace period active for system settings")
+            try {
+                com.focal.app.protection.ProtectionStateRepository.instance.recordDecision(
+                    com.focal.app.protection.DecisionLogEntry(
+                        timestampMs = System.currentTimeMillis(),
+                        packageName = "com.focal.app",
+                        windowClass = "FixButton",
+                        decisionType = com.focal.app.protection.DecisionType.ALLOW,
+                        ruleLetter = 'a',
+                        reason = "FIX_ALLOWANCE_START",
+                        actionTaken = "Fix-button allowance started for up to 3 minutes"
+                    )
+                )
+            } catch (_: Exception) {}
+        }
+    }
+
+    actual fun isSetupPageGraceActive(): Boolean {
+        return System.currentTimeMillis() < setupPageAllowedUntilMs
+    }
+
+    actual fun copyToClipboard(text: String) {
         try {
             appContext?.let { ctx ->
+                val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText("Focal Protection Log", text)
+                clipboard?.setPrimaryClip(clip)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun safeStartActivity(intent: Intent) {
+        markSetupPageOpened()
+        try {
+            appContext?.let { ctx ->
+                Log.d("FOCAL_PERM_LOG", "safeStartActivity: action=${intent.action}, data=${intent.data}, component=${intent.component}")
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 ctx.startActivity(intent)
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e("FOCAL_PERM_LOG", "safeStartActivity failed for action=${intent.action}: ${e.message}", e)
             // Fallback to general settings page to prevent crashes or loops
             try {
                 appContext?.let { ctx ->
@@ -36,10 +82,12 @@ actual object PlatformPermissionsHelper {
     }
 
     actual fun openAccessibilitySettings() {
+        Log.d("FOCAL_PERM_LOG", "openAccessibilitySettings called")
         safeStartActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
 
     actual fun openOverlaySettings() {
+        Log.d("FOCAL_PERM_LOG", "openOverlaySettings called")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             safeStartActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${appContext?.packageName}")))
         } else {
@@ -48,10 +96,12 @@ actual object PlatformPermissionsHelper {
     }
 
     actual fun openUsageAccessSettings() {
+        Log.d("FOCAL_PERM_LOG", "openUsageAccessSettings called")
         safeStartActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
     }
 
     actual fun openNotificationSettings() {
+        Log.d("FOCAL_PERM_LOG", "openNotificationSettings called")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
                 putExtra(Settings.EXTRA_APP_PACKAGE, appContext?.packageName)
@@ -63,17 +113,30 @@ actual object PlatformPermissionsHelper {
     }
 
     actual fun openBatteryOptimizationSettings() {
+        Log.d("FOCAL_PERM_LOG", "openBatteryOptimizationSettings called")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                data = Uri.parse("package:${appContext?.packageName}")
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${appContext?.packageName}")
+                }
+                safeStartActivity(intent)
+            } catch (e: Exception) {
+                Log.e("FOCAL_PERM_LOG", "Primary battery opt intent failed, falling back to ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS", e)
+                try {
+                    val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    safeStartActivity(fallbackIntent)
+                } catch (e2: Exception) {
+                    Log.e("FOCAL_PERM_LOG", "Secondary battery opt intent failed, opening app details", e2)
+                    openAppDetailsSettings()
+                }
             }
-            safeStartActivity(intent)
         } else {
             safeStartActivity(Intent(Settings.ACTION_SETTINGS))
         }
     }
 
     actual fun openExactAlarmSettings() {
+        Log.d("FOCAL_PERM_LOG", "openExactAlarmSettings called")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
                 data = Uri.parse("package:${appContext?.packageName}")
@@ -85,17 +148,24 @@ actual object PlatformPermissionsHelper {
     }
 
     actual fun openDeviceAdminSettings() {
+        Log.d("FOCAL_PERM_LOG", "openDeviceAdminSettings called")
         try {
             val ctx = appContext ?: return
-            val componentName = ComponentName(ctx.packageName, "com.example.myapplication.receiver.FocalDeviceAdminReceiver")
+            val componentName = ComponentName(ctx, "com.example.myapplication.protection.FocalDeviceAdminReceiver")
             val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
                 putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, componentName)
-                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "FOCAL Device Admin stops protection from being removed silently by child.")
+                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Stops FOCAL from being removed without the parent.")
             }
             safeStartActivity(intent)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e("FOCAL_PERM_LOG", "Device admin intent failed, opening security settings fallback", e)
             safeStartActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
         }
+    }
+
+    actual fun openSecuritySettings() {
+        Log.d("FOCAL_PERM_LOG", "openSecuritySettings called")
+        safeStartActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
     }
 
     actual fun openNfcSettings() {
@@ -112,11 +182,20 @@ actual object PlatformPermissionsHelper {
     actual fun isAccessibilityEnabled(): Boolean {
         return try {
             val ctx = appContext ?: return false
+            val expectedComponent = ComponentName(ctx, "com.example.myapplication.service.FocalAccessibilityService")
+            val fullCompName = expectedComponent.flattenToString()
+            val shortCompName = expectedComponent.flattenToShortString()
+            
             val enabledServices = Settings.Secure.getString(
                 ctx.contentResolver,
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
             ) ?: ""
-            enabledServices.contains("FocalAccessibilityService") || enabledServices.contains(ctx.packageName)
+            
+            val isEnabledInSettings = enabledServices.contains(fullCompName) ||
+                    enabledServices.contains(shortCompName) ||
+                    enabledServices.contains("FocalAccessibilityService")
+                    
+            isEnabledInSettings && isAccessibilityServiceConnected
         } catch (_: Exception) {
             false
         }
@@ -207,9 +286,12 @@ actual object PlatformPermissionsHelper {
         return try {
             val ctx = appContext ?: return false
             val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-            val componentName = ComponentName(ctx.packageName, "com.example.myapplication.receiver.FocalDeviceAdminReceiver")
-            dpm.isAdminActive(componentName)
-        } catch (_: Exception) {
+            val componentName = ComponentName(ctx, "com.example.myapplication.protection.FocalDeviceAdminReceiver")
+            val active = dpm.isAdminActive(componentName)
+            Log.d("FOCAL_ADMIN", "isDeviceAdminActive check for $componentName: $active")
+            active
+        } catch (e: Exception) {
+            Log.e("FOCAL_ADMIN", "Error checking isDeviceAdminActive: ${e.message}", e)
             false
         }
     }
@@ -281,3 +363,35 @@ actual object PlatformPermissionsHelper {
         }
     }
 }
+
+@Composable
+actual fun rememberDeviceAdminLauncher(onResult: (Boolean) -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val isActive = PlatformPermissionsHelper.isDeviceAdminActive()
+        Log.d("FOCAL_ADMIN", "Device admin launcher result code=${result.resultCode}, active=$isActive")
+        onResult(isActive)
+    }
+
+    return {
+        PlatformPermissionsHelper.markSetupPageOpened()
+        try {
+            val admin = ComponentName(context, "com.example.myapplication.protection.FocalDeviceAdminReceiver")
+            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
+                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Stops FOCAL from being removed without the parent.")
+            }
+            Log.d("FOCAL_ADMIN", "Launching Device Admin prompt from Activity context via ActivityResultLauncher: $admin")
+            launcher.launch(intent)
+        } catch (e: Exception) {
+            Log.e("FOCAL_ADMIN", "Failed launching device admin intent via launcher", e)
+            try {
+                val fallbackIntent = Intent(Settings.ACTION_SECURITY_SETTINGS)
+                launcher.launch(fallbackIntent)
+            } catch (_: Exception) {}
+        }
+    }
+}
+

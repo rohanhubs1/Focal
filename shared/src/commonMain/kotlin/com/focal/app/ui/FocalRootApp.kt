@@ -45,6 +45,7 @@ enum class AppScreenState {
     PARENT_ADD_CHILD,
     PARENT_PAIR_CHILD,
     CHILD_PAIRING,
+    PROMINENT_DISCLOSURE,
     CHILD_PERMISSIONS,
     CARD_SETUP,
     PROTECTION_OFF,
@@ -112,6 +113,8 @@ fun FocalRootApp(
             val setupDone = FocalLocalStorage.getBoolean("KEY_SETUP_DONE", false)
             val allRequiredOn = checkAllChildPermissionsOn()
             if (!setupDone) {
+                val disclosureAgreed = FocalLocalStorage.getBoolean("KEY_DISCLOSURE_AGREED", false)
+                if (!disclosureAgreed) return AppScreenState.PROMINENT_DISCLOSURE
                 if (!allRequiredOn) return AppScreenState.CHILD_PERMISSIONS
                 return AppScreenState.CARD_SETUP
             }
@@ -466,7 +469,19 @@ fun FocalRootApp(
                             ChildPairingScreen(
                                 onPairingSuccess = {
                                     FocalLocalStorage.saveBoolean("KEY_AUTH_DONE", true)
+                                    navigateToScreen(AppScreenState.PROMINENT_DISCLOSURE)
+                                }
+                            )
+                        }
+
+                        AppScreenState.PROMINENT_DISCLOSURE -> {
+                            ProminentDisclosureScreen(
+                                onAgree = {
+                                    FocalLocalStorage.saveBoolean("KEY_DISCLOSURE_AGREED", true)
                                     navigateToScreen(AppScreenState.CHILD_PERMISSIONS)
+                                },
+                                onCancel = {
+                                    navigateToScreen(AppScreenState.ROLE_SELECTION)
                                 }
                             )
                         }
@@ -481,10 +496,12 @@ fun FocalRootApp(
                             CardSetupScreen(
                                 onSetupFinished = {
                                     FocalLocalStorage.saveBoolean("KEY_SETUP_DONE", true)
+                                    com.focal.app.protection.ProtectionStateRepository.instance.updateSetupComplete(true)
                                     navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
                                 },
                                 onSkip = {
                                     FocalLocalStorage.saveBoolean("KEY_SETUP_DONE", true)
+                                    com.focal.app.protection.ProtectionStateRepository.instance.updateSetupComplete(true)
                                     navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
                                 }
                             )
@@ -615,13 +632,16 @@ fun FocalRootApp(
                     )
                 }
 
-                // Error Alert Dialog for Validation Failures
+                // Missing Permissions Bottom Sheet (Replaces Access Error popup)
                 var validationErrorMessage by remember { mutableStateOf<String?>(null) }
                 if (validationErrorMessage != null) {
-                    ErrorState(
-                        title = "Access Error",
-                        description = validationErrorMessage!!,
-                        onRetry = { validationErrorMessage = null }
+                    MissingPermissionsBottomSheet(
+                        missingItems = focusEngine.missingPermissionsList.ifEmpty { listOf(validationErrorMessage!!) },
+                        onDismiss = { validationErrorMessage = null },
+                        onOpenPermissions = {
+                            validationErrorMessage = null
+                            navigateToScreen(AppScreenState.CHILD_PERMISSIONS)
+                        }
                     )
                 }
 

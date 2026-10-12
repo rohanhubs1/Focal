@@ -963,13 +963,41 @@ class FocalRepository private constructor() {
         return newChild to pairingToken
     }
 
-    // Protection Telemetry & Server Heartbeat Logic
+    // Protection Telemetry, Settings Guard & Server Heartbeat Logic
     var isProtectionDisabledOnChild by mutableStateOf(false)
     var protectionDisabledReason by mutableStateOf("")
     var lastHeartbeatTimeMs by mutableStateOf(currentTimeMillis())
     var lastHeartbeatBatteryLevel by mutableStateOf(85)
     var lastOfflineAlertSentTimeMs by mutableStateOf(0L)
     var isDeviceOfflineAlertActive by mutableStateOf(false)
+
+    // Protection Guard Mode: "ALWAYS" (default for child) or "DURING_FOCUS_ONLY"
+    var childGuardMode by mutableStateOf("ALWAYS")
+
+    // Parent Unlock Timer (Pauses settings guard for 10 minutes)
+    var parentUnlockedUntilMs by mutableStateOf(0L)
+
+    fun isParentGuardUnlocked(): Boolean {
+        return currentTimeMillis() < parentUnlockedUntilMs
+    }
+
+    fun unlockParentGuardFor10Minutes(): String {
+        val tenMinsMs = 10 * 60 * 1000L
+        parentUnlockedUntilMs = currentTimeMillis() + tenMinsMs
+        com.focal.app.protection.ProtectionStateRepository.instance.unlockParentForDuration(
+            durationMs = tenMinsMs,
+            currentElapsed = com.focal.app.model.currentTimeMillis()
+        )
+        notifications.add(0, NotificationItem(
+            id = "notif_${currentTimeMillis()}",
+            userId = controllerUser.id,
+            type = "PARENT_UNLOCK",
+            title = "Parent Unlock Activated",
+            message = "Protection guard paused on child device for 10 minutes.",
+            timestamp = "Just now"
+        ))
+        return "Parent unlock active for 10 minutes. Settings access permitted."
+    }
 
     fun reportProtectionDisabled(reason: String) {
         isProtectionDisabledOnChild = true
@@ -1029,6 +1057,125 @@ class FocalRepository private constructor() {
             reportProtectionDisabled("Permissions missing in heartbeat signal")
         } else if (isProtectionDisabledOnChild && permissionsMap.isNotEmpty() && !isAnyOff) {
             reportProtectionRestored()
+        }
+    }
+
+    fun reportGuardTriggered(screenName: String) {
+        notifications.add(0, NotificationItem(
+            id = "notif_${currentTimeMillis()}",
+            userId = controllerUser.id,
+            type = "GUARD_TRIGGERED",
+            title = "Settings Guard Intercepted",
+            message = "Blocked attempt to access: $screenName",
+            timestamp = "Just now"
+        ))
+    }
+
+    fun reportUninstallAttempt() {
+        reportProtectionDisabled("Child attempted to uninstall FOCAL")
+        notifications.add(0, NotificationItem(
+            id = "notif_${currentTimeMillis()}",
+            userId = controllerUser.id,
+            type = "UNINSTALL_ATTEMPT",
+            title = "UNINSTALL ATTEMPT DETECTED",
+            message = "Child attempted to uninstall the FOCAL app package.",
+            timestamp = "Just now"
+        ))
+    }
+
+    fun reportForceStopAttempt() {
+        reportProtectionDisabled("Child attempted to force-stop FOCAL")
+        notifications.add(0, NotificationItem(
+            id = "notif_${currentTimeMillis()}",
+            userId = controllerUser.id,
+            type = "FORCE_STOP_ATTEMPT",
+            title = "FORCE STOP ATTEMPT DETECTED",
+            message = "Child attempted to force-stop FOCAL background service.",
+            timestamp = "Just now"
+        ))
+    }
+
+    fun reportDeviceAdminDisableAttempt() {
+        reportProtectionDisabled("Child requested to deactivate Device Admin")
+        notifications.add(0, NotificationItem(
+            id = "notif_${currentTimeMillis()}",
+            userId = controllerUser.id,
+            type = "DEVICE_ADMIN_DISABLE_ATTEMPT",
+            title = "DEVICE ADMIN DEACTIVATION ATTEMPT",
+            message = "Child opened Device Admin settings to remove FOCAL protection.",
+            timestamp = "Just now"
+        ))
+    }
+
+    fun reportDeviceRebootedDuringFocus() {
+        notifications.add(0, NotificationItem(
+            id = "notif_${currentTimeMillis()}",
+            userId = controllerUser.id,
+            type = "DEVICE_REBOOTED_DURING_FOCUS",
+            title = "Device Rebooted During Focus",
+            message = "Child's phone restarted while a focus session was active. Protection auto-restored.",
+            timestamp = "Just now"
+        ))
+    }
+
+    fun reportUsbDebuggingOn() {
+        notifications.add(0, NotificationItem(
+            id = "notif_${currentTimeMillis()}",
+            userId = controllerUser.id,
+            type = "USB_DEBUGGING_ON",
+            title = "USB Debugging / ADB Enabled",
+            message = "USB Debugging or Developer Options turned on on child device.",
+            timestamp = "Just now"
+        ))
+    }
+
+    fun reportFocusEndedWithoutCard() {
+        notifications.add(0, NotificationItem(
+            id = "notif_${currentTimeMillis()}",
+            userId = controllerUser.id,
+            type = "FOCUS_ENDED_WITHOUT_CARD",
+            title = "Focus Ended Without Card",
+            message = "Session ended without card tap or parent approval.",
+            timestamp = "Just now"
+        ))
+    }
+
+    fun reportClockChanged() {
+        notifications.add(0, NotificationItem(
+            id = "notif_${currentTimeMillis()}",
+            userId = controllerUser.id,
+            type = "CLOCK_CHANGED",
+            title = "System Time Tampering Detected",
+            message = "System clock was changed on child device. Session duration calculated using monotonic hardware clock.",
+            timestamp = "Just now"
+        ))
+    }
+
+    fun reportExtraProfileDetected() {
+        notifications.add(0, NotificationItem(
+            id = "notif_${currentTimeMillis()}",
+            userId = controllerUser.id,
+            type = "EXTRA_PROFILE_DETECTED",
+            title = "Second Space / Guest Profile Detected",
+            message = "A second user space or guest profile was opened or configured.",
+            timestamp = "Just now"
+        ))
+    }
+
+    // Solo Mode Strict Configuration
+    var isSoloStrictModeEnabled by mutableStateOf(false)
+
+    fun toggleSoloStrictMode(cardVerified: Boolean): Pair<Boolean, String> {
+        return if (!isSoloStrictModeEnabled) {
+            isSoloStrictModeEnabled = true
+            true to "Solo Strict Mode enabled. Card tap required to turn off."
+        } else {
+            if (cardVerified) {
+                isSoloStrictModeEnabled = false
+                true to "Solo Strict Mode disabled."
+            } else {
+                false to "Tap your paired FOCAL card to turn off Solo Strict Mode."
+            }
         }
     }
 

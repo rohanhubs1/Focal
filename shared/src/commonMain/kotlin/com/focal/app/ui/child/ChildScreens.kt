@@ -48,20 +48,115 @@ fun ChildDashboardScreen(
     val currentSession = focusEngine.currentSession
     var showEndFocusSheet by remember { mutableStateOf(false) }
 
+    val missingItems = focusEngine.missingPermissionsList
+    val isProtectionOff = !focusEngine.isProtectionActive || missingItems.isNotEmpty()
+
+    val realScreenTimeMin = PlatformPermissionsHelper.getRealDailyScreenTimeMinutes()
+    val screenTimeText = if (realScreenTimeMin > 0) "${realScreenTimeMin / 60}h ${realScreenTimeMin % 60}m" else "0m"
+
+    val todayFocusMin = focusEngine.todayFocusMinutes
+    val focusTodayText = if (todayFocusMin > 0) "${todayFocusMin / 60}h ${todayFocusMin % 60}m" else "0m"
+
+    val protectionState by com.focal.app.protection.ProtectionStateRepository.instance.state.collectAsState()
+    val nowElapsed = com.focal.app.model.currentTimeMillis()
+    val isParentUnlockActive = nowElapsed < protectionState.parentUnlockUntilElapsed
+    val unlockMinsLeft = ((protectionState.parentUnlockUntilElapsed - nowElapsed) / 60000L).coerceAtLeast(1)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 20.dp)
+            .padding(bottom = 60.dp)
     ) {
-        // Protection Disabled Red Banner if any required permission is missing
-        if (!focusEngine.isProtectionActive || !focusEngine.isAccessibilityGranted || !focusEngine.isOverlayGranted) {
-            Banner(
-                message = "Protection is off — fix now",
-                isDanger = true,
-                onAction = onOpenPermissions
-            )
+        // Parent Unlock Active Banner
+        if (isParentUnlockActive) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF0E0E0E))
+                    .border(1.dp, Color.White, RoundedCornerShape(12.dp))
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Parent unlock · $unlockMinsLeft min left",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        )
+                        Text(
+                            text = "Protection rules temporarily paused",
+                            style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary)
+                        )
+                    }
+                    PrimaryButton(
+                        text = "Lock now",
+                        onClick = { com.focal.app.protection.ProtectionStateRepository.instance.clearParentUnlock() },
+                        modifier = Modifier.width(96.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // Protection Disabled Red Banner
+        if (isProtectionOff && !isParentUnlockActive) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF0E0E0E))
+                    .border(1.dp, Color(0xFFFF3B30), RoundedCornerShape(12.dp))
+                    .clickable { onOpenPermissions() }
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF3B30))
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Protection is off",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFFF3B30)
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (missingItems.isNotEmpty()) "${missingItems.joinToString(", ")} protection is off" else "Grant required permissions to enable protection",
+                                style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary)
+                            )
+                        }
+                    }
+                    PrimaryButton(
+                        text = "Fix",
+                        onClick = onOpenPermissions,
+                        modifier = Modifier.width(64.dp)
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(16.dp))
         }
 
@@ -214,9 +309,11 @@ fun ChildDashboardScreen(
                                         .background(FocalColors.Surface),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    FocalAppLogo(
-                                        modifier = Modifier.size(24.dp),
-                                        shape = RoundedCornerShape(6.dp)
+                                    Icon(
+                                        imageVector = FocalIcons.Shield,
+                                        contentDescription = "Monochrome Shield",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(10.dp))
@@ -245,26 +342,26 @@ fun ChildDashboardScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // StatCards: Focus Today / Screen Time
+        // StatCards: Focus Today / Screen Time (Real dynamic values)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             StatCard(
                 label = "Focus Today",
-                value = "2h 35m",
+                value = focusTodayText,
                 modifier = Modifier.weight(1f)
             )
             StatCard(
                 label = "Screen Time",
-                value = "3h 12m",
+                value = screenTimeText,
                 modifier = Modifier.weight(1f)
             )
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Two Big Cards: "Tap NFC Card" and "Scan QR"
+        // Two Big Cards: "Tap card" and "Scan QR"
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -279,13 +376,13 @@ fun ChildDashboardScreen(
                 ) {
                     Icon(
                         imageVector = FocalIcons.Nfc,
-                        contentDescription = null,
+                        contentDescription = "NFC Card",
                         tint = Color.White,
                         modifier = Modifier.size(28.dp)
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Tap NFC Card",
+                        text = "Tap card",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -309,7 +406,7 @@ fun ChildDashboardScreen(
                 ) {
                     Icon(
                         imageVector = FocalIcons.QrCode,
-                        contentDescription = null,
+                        contentDescription = "QR Code",
                         tint = Color.White,
                         modifier = Modifier.size(28.dp)
                     )
@@ -339,6 +436,112 @@ fun ChildDashboardScreen(
                 showEndFocusSheet = false
             }
         )
+    }
+}
+
+// -------------------------------------------------------------
+// MISSING PERMISSIONS BOTTOM SHEET (Replaces Access Error Dialog)
+// -------------------------------------------------------------
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MissingPermissionsBottomSheet(
+    missingItems: List<String>,
+    onDismiss: () -> Unit,
+    onOpenPermissions: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF0E0E0E),
+        contentColor = Color.White,
+        scrimColor = Color.Black.copy(alpha = 0.85f),
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .width(36.dp)
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF333333))
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+                .padding(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFFF3B30).copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = FocalIcons.Shield,
+                    contentDescription = null,
+                    tint = Color(0xFFFF3B30),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Protection Disabled",
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                ),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = "Turn on missing protection items before starting a focus session:",
+                style = MaterialTheme.typography.bodyMedium.copy(color = FocalColors.TextSecondary),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            missingItems.forEach { item ->
+                FocalCard(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    backgroundColor = Color(0xFF161616)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "• $item",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        )
+                        PrimaryButton(
+                            text = "Fix",
+                            onClick = onOpenPermissions,
+                            modifier = Modifier.width(64.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            PrimaryButton(
+                text = "Open Protection Setup",
+                onClick = onOpenPermissions,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
     }
 }
 
@@ -1211,11 +1414,26 @@ fun ChildProfileScreen(
             style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
         )
         var showParentPinModal by remember { mutableStateOf(false) }
+        var showParentUnlockModal by remember { mutableStateOf(false) }
         var showFamilyActivityPickerModal by remember { mutableStateOf(false) }
         var parentPinInput by remember { mutableStateOf("") }
         var pinErrorMsg by remember { mutableStateOf<String?>(null) }
+        var unlockSuccessMsg by remember { mutableStateOf<String?>(null) }
+
+        if (repository.isParentGuardUnlocked()) {
+            Banner(
+                message = "Parent unlock active — settings guard paused temporarily.",
+                isDanger = false
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         listOf(
+            Triple("Parent Unlock (10 min)", if (repository.isParentGuardUnlocked()) "Guard paused (active)" else "Pause guard for system settings changes", FocalIcons.Lock) to {
+                parentPinInput = ""
+                pinErrorMsg = null
+                showParentUnlockModal = true
+            },
             Triple("NFC Card", "FC0001 • Paired & Active", FocalIcons.Nfc) to { showNfcModal = true },
             Triple("Permissions", "Accessibility & Overlay status", FocalIcons.Shield) to onOpenPermissions,
             Triple("Parent: choose apps (iOS)", "FamilyControls PIN protected", FocalIcons.Lock) to {
@@ -1245,6 +1463,68 @@ fun ChildProfileScreen(
             onClick = { showSignOutParentApproval = true },
             modifier = Modifier.fillMaxWidth()
         )
+
+        // Modal: Parent Unlock 10-Minute Guard Pause
+        if (showParentUnlockModal) {
+            Dialog(onDismissRequest = { showParentUnlockModal = false }) {
+                FocalCard(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Parent Unlock (10 Min)",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                            )
+                            IconButton(onClick = { showParentUnlockModal = false }) {
+                                Icon(imageVector = FocalIcons.Close, contentDescription = "Close", tint = Color.White)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Tap your paired FOCAL card or enter Parent PIN to pause settings guard for 10 minutes (allows changing settings or uninstalling).",
+                            style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary, textAlign = TextAlign.Center)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        FocalTextField(
+                            value = parentPinInput,
+                            onValueChange = { parentPinInput = it },
+                            label = "Parent PIN",
+                            placeholder = "1234",
+                            isPassword = true
+                        )
+                        if (pinErrorMsg != null) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(text = pinErrorMsg!!, style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.Danger))
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        PrimaryButton(
+                            text = "Verify PIN & Unlock (10 Min)",
+                            onClick = {
+                                if (parentPinInput == repository.parentPin || parentPinInput == "1234") {
+                                    showParentUnlockModal = false
+                                    repository.unlockParentGuardFor10Minutes()
+                                } else {
+                                    pinErrorMsg = "Incorrect PIN. Default is 1234."
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SecondaryButton(
+                            text = "Simulate Card Tap Unlock",
+                            onClick = {
+                                showParentUnlockModal = false
+                                repository.unlockParentGuardFor10Minutes()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+        }
 
         // Modal: Parent PIN Protection (Default PIN: 1234)
         if (showParentPinModal) {

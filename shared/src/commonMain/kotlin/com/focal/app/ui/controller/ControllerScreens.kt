@@ -1056,7 +1056,7 @@ fun ScheduleEditScreen(
                             val nameToSave = titleInput.ifBlank { "Focus Routine" }
                             val daysStr = selectedDays.joinToString(", ")
                             val updated = ScheduleItem(
-                                id = schedule?.id ?: "sch_${System.currentTimeMillis()}",
+                                id = schedule?.id ?: "sch_${currentTimeMillis()}",
                                 title = nameToSave,
                                 timeRange = "$startTimeInput – $endTimeInput",
                                 days = daysStr,
@@ -1324,7 +1324,7 @@ fun PolicyEditScreen(
                             onClick = {
                                 val nameToSave = policyName.ifBlank { "Custom Focus Policy" }
                                 val updated = FocusPolicy(
-                                    id = policy?.id ?: "pol_${System.currentTimeMillis()}",
+                                    id = policy?.id ?: "pol_${currentTimeMillis()}",
                                     childId = policy?.childId ?: "child_1",
                                     name = nameToSave,
                                     mode = selectedMode,

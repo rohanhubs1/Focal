@@ -2,104 +2,50 @@ package com.example.myapplication.service
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
+import android.os.SystemClock
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
-import com.example.myapplication.MainActivity
+import android.view.accessibility.AccessibilityWindowInfo
+import com.focal.app.data.FocalRepository
 import com.focal.app.engine.FocusEngine
-import com.focal.app.model.SessionState
+import com.focal.app.protection.*
 
 class FocalAccessibilityService : AccessibilityService() {
 
     companion object {
+        private const val TAG = "FOCAL_ACCESSIBILITY"
+
         var isServiceRunning = false
             private set
 
-        private var lastBlockedPackage: String? = null
-        private var lastBlockedTimeMs: Long = 0L
-        private const val DEBOUNCE_THRESHOLD_MS = 1500L
-
-        private val CRITICAL_SYSTEM_PACKAGES = setOf(
-            "com.android.phone",
-            "com.android.dialer",
-            "com.google.android.dialer",
-            "com.android.settings",
-            "com.android.systemui",
-            "com.android.calculator2",
-            "com.google.android.calculator",
-            "com.android.camera",
-            "com.google.android.GoogleCamera",
-            "com.android.contacts",
-            "com.google.android.contacts",
-            "com.android.mms",
-            "com.google.android.apps.messaging",
-
-            // Indian & International Banking / UPI Apps (Never interfere or block)
-            "com.sbi.lotusintouch",
-            "com.csam.yonosbi",
-            "com.hdfcbank.mobilebanking",
-            "com.icicibank.mobilebanking",
-            "net.one97.paytm",
-            "com.phonepe.app",
-            "com.google.android.apps.nbu.paisa.user",
-            "com.cred.club",
-            "in.org.npci.upiapp",
-            "com.axis.mobile"
-        )
-
-        private val LAUNCHER_PACKAGES = setOf(
-            "com.google.android.apps.nexuslauncher",
-            "com.sec.android.app.launcher",
-            "com.miui.home",
-            "com.oppo.launcher",
-            "com.huawei.android.launcher",
-            "com.oneplus.launcher",
-            "com.android.launcher",
-            "com.android.launcher3",
-            "com.android.systemui"
-        )
-
-        // Common browser package names
-        private val BROWSER_PACKAGES = setOf(
-            "com.android.chrome",
-            "com.google.android.apps.chrome",
-            "org.mozilla.firefox",
-            "com.microsoft.emmx",
-            "com.sec.android.app.sbrowser",
-            "com.brave.browser",
-            "com.opera.browser",
-            "com.opera.mini.native",
-            "com.duckduckgo.mobile.android"
-        )
-
-        // Well-known app package mappings
-        val APP_NAME_TO_PACKAGE = mapOf(
-            "Instagram" to "com.instagram.android",
-            "YouTube" to "com.google.android.youtube",
-            "Facebook" to "com.facebook.katana",
-            "Snapchat" to "com.snapchat.android",
-            "Netflix" to "com.netflix.mediaclient",
-            "Games" to "com.supercell.clashofclans",
-            "TikTok" to "com.zhiliaoapp.musically",
-            "Twitter" to "com.twitter.android",
-            "X" to "com.twitter.android",
-            "Reddit" to "com.reddit.frontpage",
-            "Discord" to "com.discord",
-            "Pinterest" to "com.pinterest",
-            "Telegram" to "org.telegram.messenger",
-            "WhatsApp" to "com.whatsapp"
-        )
+        var instance: FocalAccessibilityService? = null
+            private set
     }
+
+    private var focalAppLabel: String = "focal"
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         isServiceRunning = true
-        com.focal.app.data.FocalRepository.instance.reportProtectionRestored()
+        com.focal.app.ui.components.PlatformPermissionsHelper.isAccessibilityServiceConnected = true
+        instance = this
+        try {
+            focalAppLabel = packageManager.getApplicationLabel(applicationInfo).toString().lowercase()
+        } catch (_: Exception) {
+            focalAppLabel = "focal"
+        }
+        Log.d(TAG, "onServiceConnected: FOCAL Accessibility Service active. App label = '$focalAppLabel'")
+        FocalRepository.instance.reportProtectionRestored()
         FocusEngine.instance.checkAndUpdatePermissions()
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         isServiceRunning = false
-        com.focal.app.data.FocalRepository.instance.reportProtectionDisabled("Accessibility Service Disabled")
+        com.focal.app.ui.components.PlatformPermissionsHelper.isAccessibilityServiceConnected = false
+        if (instance == this) instance = null
+        Log.d(TAG, "onUnbind: Accessibility Service unbound")
+        FocalRepository.instance.reportProtectionDisabled("Accessibility Service Disabled")
         FocusEngine.instance.checkAndUpdatePermissions()
         return super.onUnbind(intent)
     }
@@ -107,129 +53,194 @@ class FocalAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         isServiceRunning = false
-        com.focal.app.data.FocalRepository.instance.reportProtectionDisabled("Accessibility Service Stopped")
+        com.focal.app.ui.components.PlatformPermissionsHelper.isAccessibilityServiceConnected = false
+        if (instance == this) instance = null
+        Log.d(TAG, "onDestroy: Accessibility Service destroyed")
+        FocalRepository.instance.reportProtectionDisabled("Accessibility Service Stopped")
         FocusEngine.instance.checkAndUpdatePermissions()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+        try {
+            val nowElapsed = SystemClock.elapsedRealtime()
+            val ownPackage = applicationContext.packageName
 
-        val focusEngine = FocusEngine.instance
-        if (focusEngine.sessionState != SessionState.ACTIVE || !focusEngine.isProtectionActive) return
+            // 1. Detect Top Active Application Window & Package
+            val windowInfo = extractWindowInfo(event, ownPackage) ?: return
 
-        val currentSession = focusEngine.currentSession ?: return
-        val packageName = event.packageName?.toString() ?: return
-        val lowerPkg = packageName.lowercase()
+            // 2. Query Protection Engine for Decision (Pure Kotlin Engine)
+            val state = ProtectionStateRepository.instance.state.value
+            val isFixActive = com.focal.app.ui.components.PlatformPermissionsHelper.isSetupPageGraceActive()
+            val decision = ProtectionEngine.decide(
+                windowInfo = windowInfo,
+                state = state,
+                nowElapsed = nowElapsed,
+                appLabel = focalAppLabel,
+                ownPackage = ownPackage,
+                isFixAllowanceActive = isFixActive
+            )
 
-        // Skip our own app, banking apps, dialer, settings, screenshot UI, & launcher packages
-        if (lowerPkg == applicationContext.packageName.lowercase() ||
-            CRITICAL_SYSTEM_PACKAGES.contains(lowerPkg) ||
-            lowerPkg.contains("screenshot") ||
-            lowerPkg.contains("smartcapture") ||
-            lowerPkg.contains("screenrecorder") ||
-            lowerPkg.contains("screenrecord") ||
-            lowerPkg.contains("systemui") ||
-            lowerPkg.contains("capture") ||
-            lowerPkg.contains("markup") ||
-            lowerPkg.contains("incallui") ||
-            lowerPkg.contains("keyguard")) return
+            Log.d(TAG, "onAccessibilityEvent: pkg=${windowInfo.packageName}, focusActive=${state.focusActive}, decision=${decision.label}")
 
-        if (LAUNCHER_PACKAGES.contains(lowerPkg)) {
-            // User returned to home screen
-            lastBlockedPackage = null
-            return
-        }
-
-        // Only inspect on Window State Changed to avoid infinite loops from scroll/view events
-        val eventType = event.eventType
-        val isWindowStateEvent = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-
-        // Fetch active policy
-        val repo = com.focal.app.data.FocalRepository.instance
-        val activePolicy = repo.policies.firstOrNull { it.id == currentSession.policyId }
-
-        // Check Always-Allowed List (Dialer, SOS, FOCAL, Settings, or custom allowed)
-        val alwaysAllowed = activePolicy?.alwaysAllowedApps ?: emptyList()
-        if (alwaysAllowed.any { lowerPkg.contains(it.lowercase()) }) return
-
-        // 1. Direct Package / App Name Blocking
-        val blockedApps = activePolicy?.blockedApps ?: listOf("Instagram", "YouTube", "Facebook", "Snapchat", "Netflix", "Games")
-        for (appName in blockedApps) {
-            val pkg = APP_NAME_TO_PACKAGE[appName]?.lowercase() ?: appName.lowercase()
-            if (pkg.length >= 3 && lowerPkg.contains(pkg)) {
-                if (isWindowStateEvent) {
-                    interceptAndBlockApp(appName, packageName)
-                }
-                return
-            }
-        }
-
-        // 2. Category-Based Blocking (Newly installed apps in blocked category are blocked automatically)
-        val blockedCategories = activePolicy?.blockedCategories ?: emptyList()
-        if (blockedCategories.isNotEmpty()) {
-            val installedApp = repo.childInstalledApps.find { it.packageName.lowercase() == lowerPkg }
-            if (installedApp != null && blockedCategories.contains(installedApp.category)) {
-                if (isWindowStateEvent) {
-                    interceptAndBlockApp("${installedApp.appName} (${installedApp.category})", packageName)
-                }
-                return
-            }
-        }
-
-        // 3. Subdomain Website Blocking inside browser
-        if (BROWSER_PACKAGES.contains(packageName)) {
-            val blockedWebsites = activePolicy?.blockedWebsites ?: listOf("instagram.com", "youtube.com", "facebook.com", "netflix.com", "reddit.com")
-            inspectAndBlockWebsites(rootInActiveWindow, blockedWebsites, packageName)
+            // 3. Delegate Action Execution (Smooth Overlay + HOME)
+            ActionExecutor.execute(
+                context = applicationContext,
+                accessibilityService = this,
+                windowInfo = windowInfo,
+                decision = decision,
+                currentElapsed = nowElapsed
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing accessibility event: ${e.message}", e)
         }
     }
 
-    private fun inspectAndBlockWebsites(nodeInfo: AccessibilityNodeInfo?, blockedWebsites: List<String>, packageName: String) {
-        if (nodeInfo == null) return
+    private fun extractWindowInfo(event: AccessibilityEvent, ownPackage: String): WindowInfo? {
+        var topPackage: String? = null
+        var topClass: String = event.className?.toString() ?: ""
+        var isAppWindow = true
 
         try {
-            val text = nodeInfo.text?.toString()?.lowercase() ?: ""
-            if (text.isNotBlank()) {
-                val repo = com.focal.app.data.FocalRepository.instance
-                if (repo.isDomainBlocked(text, blockedWebsites)) {
-                    val cleanDomain = repo.normalizeDomain(text)
-                    interceptAndBlockApp("Website: $cleanDomain", packageName)
-                    return
+            val interactiveWindows = windows
+            if (!interactiveWindows.isNullOrEmpty()) {
+                val appWindow = interactiveWindows.firstOrNull {
+                    it.type == AccessibilityWindowInfo.TYPE_APPLICATION && (it.isFocused || it.isActive)
+                } ?: interactiveWindows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+
+                if (appWindow != null) {
+                    val rootNode = appWindow.root
+                    if (rootNode != null) {
+                        topPackage = rootNode.packageName?.toString()
+                    }
                 }
             }
+        } catch (_: Exception) {}
 
-            for (i in 0 until nodeInfo.childCount) {
-                inspectAndBlockWebsites(nodeInfo.getChild(i), blockedWebsites, packageName)
-            }
-        } catch (_: Exception) {
-            // Ignore node recycling errors
+        if (topPackage.isNullOrBlank()) {
+            topPackage = event.packageName?.toString()
         }
+
+        if (topPackage.isNullOrBlank()) return null
+
+        val lowerPkg = topPackage.lowercase()
+        val ownPkgLower = ownPackage.lowercase()
+
+        // If user returned to FOCAL app -> End Fix-button Allowance immediately
+        if (lowerPkg == ownPkgLower || lowerPkg.contains("com.focal.app") ||
+            lowerPkg.contains("com.rohan.focalapplication") || lowerPkg.contains("myapplication")) {
+            if (com.focal.app.ui.components.PlatformPermissionsHelper.isSetupPageGraceActive()) {
+                com.focal.app.ui.components.PlatformPermissionsHelper.setupPageAllowedUntilMs = 0L
+                Log.d(TAG, "FIX_ALLOWANCE_END: User returned to FOCAL app, grace ended")
+                try {
+                    ProtectionStateRepository.instance.recordDecision(
+                        DecisionLogEntry(
+                            timestampMs = System.currentTimeMillis(),
+                            packageName = ownPackage,
+                            windowClass = "FocalApp",
+                            decisionType = DecisionType.ALLOW,
+                            ruleLetter = 'a',
+                            reason = "FIX_ALLOWANCE_END",
+                            actionTaken = "Fix-button allowance ended upon returning to FOCAL"
+                        )
+                    )
+                } catch (_: Exception) {}
+            }
+            return null
+        }
+
+        // Ignore events from FOCAL's own overlay or launcher while overlay is already showing
+        if (topClass.contains("BlockOverlay") || (BlockOverlayManager.isOverlayShowing() && ProtectionEngine.LAUNCHER_PACKAGES.contains(lowerPkg))) {
+            return null
+        }
+
+        // Performance Optimization: Only perform expensive fullText view-tree traversal
+        // for packages that actually require text matching (Settings, Installers, Launchers, System UI, Play Store)
+        val requiresFullTextScan = ProtectionEngine.INSTALLER_AND_LAUNCHER_PACKAGES.contains(lowerPkg) ||
+                ProtectionEngine.SETTINGS_PACKAGES.contains(lowerPkg) ||
+                lowerPkg == "com.android.systemui" ||
+                lowerPkg == "com.android.vending"
+
+        val fullText = if (requiresFullTextScan) {
+            collectWindowTexts()
+        } else {
+            ""
+        }
+
+        val state = ProtectionStateRepository.instance.state.value
+        val urlText = if (ProtectionEngine.KNOWN_BROWSERS.contains(lowerPkg) && state.focusActive && state.policy.blockedWebsites.isNotEmpty()) {
+            extractBrowserUrlText(rootInActiveWindow)
+        } else {
+            null
+        }
+
+        return WindowInfo(
+            packageName = topPackage,
+            windowClass = topClass,
+            windowTitle = "",
+            fullText = fullText,
+            urlText = urlText,
+            isApplicationWindow = isAppWindow
+        )
     }
 
-    private fun interceptAndBlockApp(targetName: String, targetPackage: String) {
-        val focusEngine = FocusEngine.instance
-
-        // Throttle duplicate accessibility events for the exact same package
-        val now = System.currentTimeMillis()
-        if (targetPackage == lastBlockedPackage && (now - lastBlockedTimeMs) < DEBOUNCE_THRESHOLD_MS) {
-            return
+    private fun collectWindowTexts(): String {
+        val texts = mutableListOf<String>()
+        try {
+            val interactiveWindows = windows
+            if (!interactiveWindows.isNullOrEmpty()) {
+                for (window in interactiveWindows) {
+                    val root = window.root ?: continue
+                    traverseNodeTexts(root, texts)
+                }
+            } else {
+                rootInActiveWindow?.let { traverseNodeTexts(it, texts) }
+            }
+        } catch (_: Exception) {
+            rootInActiveWindow?.let { traverseNodeTexts(it, texts) }
         }
+        return texts.joinToString(" ")
+    }
 
-        lastBlockedPackage = targetPackage
-        lastBlockedTimeMs = now
+    private fun traverseNodeTexts(node: AccessibilityNodeInfo?, list: MutableList<String>) {
+        if (node == null) return
+        try {
+            val text = node.text?.toString()
+            if (!text.isNullOrBlank()) list.add(text)
 
-        // Trigger Focus Engine distraction counter & set overlay state
-        focusEngine.triggerBlockedAppAttempt(targetName)
+            val desc = node.contentDescription?.toString()
+            if (!desc.isNullOrBlank()) list.add(desc)
 
-        // Smoothly bring FOCAL MainActivity with BlockedAppOverlay to front without flickering loop
-        val intent = Intent(applicationContext, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-            putExtra("EXTRA_BLOCKED_APP", targetName)
-        }
-        startActivity(intent)
+            for (i in 0 until node.childCount) {
+                traverseNodeTexts(node.getChild(i), list)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun extractBrowserUrlText(node: AccessibilityNodeInfo?): String? {
+        if (node == null) return null
+        try {
+            val viewId = node.viewIdResourceName?.lowercase() ?: ""
+            if (viewId.contains("url") || viewId.contains("location") || viewId.contains("search") || viewId.contains("address")) {
+                val text = node.text?.toString() ?: node.contentDescription?.toString()
+                if (!text.isNullOrBlank()) return text
+            }
+            val text = node.text?.toString() ?: ""
+            if (text.contains(".com") || text.contains(".org") || text.contains(".net") || text.contains(".io") || text.contains("http")) {
+                return text
+            }
+
+            for (i in 0 until node.childCount) {
+                val childResult = extractBrowserUrlText(node.getChild(i))
+                if (childResult != null) return childResult
+            }
+        } catch (_: Exception) {}
+        return null
     }
 
     override fun onInterrupt() {
         isServiceRunning = false
+        com.focal.app.ui.components.PlatformPermissionsHelper.isAccessibilityServiceConnected = false
         FocusEngine.instance.checkAndUpdatePermissions()
     }
 }

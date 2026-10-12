@@ -8,6 +8,7 @@ actual object PlatformPermissionsHelper {
     actual fun openBatteryOptimizationSettings() {}
     actual fun openExactAlarmSettings() {}
     actual fun openDeviceAdminSettings() {}
+    actual fun openSecuritySettings() {}
     actual fun openNfcSettings() {}
     actual fun openAppDetailsSettings() {}
 
@@ -23,4 +24,14 @@ actual object PlatformPermissionsHelper {
 
     actual fun openNewBrowserTab() {}
     actual fun getRealDailyScreenTimeMinutes(): Int = 0
+
+    actual fun markSetupPageOpened() {}
+    actual fun isSetupPageGraceActive(): Boolean = false
+    actual fun copyToClipboard(text: String) {}
 }
+
+@androidx.compose.runtime.Composable
+actual fun rememberDeviceAdminLauncher(onResult: (Boolean) -> Unit): () -> Unit {
+    return { onResult(true) }
+}
+

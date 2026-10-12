@@ -34,6 +34,15 @@ object FocalLocalStorage {
         return inMemoryCache[key]?.toBooleanStrictOrNull() ?: defaultValue
     }
 
+    fun saveLong(key: String, value: Long) {
+        inMemoryCache[key] = value.toString()
+        lastSavedTimestamp = currentTimeMillis()
+    }
+
+    fun getLong(key: String, defaultValue: Long = 0L): Long {
+        return inMemoryCache[key]?.toLongOrNull() ?: defaultValue
+    }
+
     fun clear() {
         inMemoryCache.clear()
         lastSavedTimestamp = currentTimeMillis()

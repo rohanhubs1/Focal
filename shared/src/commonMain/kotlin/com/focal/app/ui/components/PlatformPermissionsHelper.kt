@@ -8,6 +8,7 @@ expect object PlatformPermissionsHelper {
     fun openBatteryOptimizationSettings()
     fun openExactAlarmSettings()
     fun openDeviceAdminSettings()
+    fun openSecuritySettings()
     fun openNfcSettings()
     fun openAppDetailsSettings()
 
@@ -23,4 +24,13 @@ expect object PlatformPermissionsHelper {
 
     fun openNewBrowserTab()
     fun getRealDailyScreenTimeMinutes(): Int
+
+    fun markSetupPageOpened()
+    fun isSetupPageGraceActive(): Boolean
+
+    fun copyToClipboard(text: String)
 }
+
+@androidx.compose.runtime.Composable
+expect fun rememberDeviceAdminLauncher(onResult: (Boolean) -> Unit): () -> Unit
+

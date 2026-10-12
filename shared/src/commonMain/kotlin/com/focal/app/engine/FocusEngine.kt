@@ -48,6 +48,8 @@ class FocusEngine private constructor() {
     var isOverlayGranted by mutableStateOf(true)
     var isProtectionActive by mutableStateOf(true)
     var protectionStatusText by mutableStateOf("Protection Active")
+    var missingPermissionsList by mutableStateOf<List<String>>(emptyList())
+    var todayFocusMinutes by mutableStateOf(0)
     var lastHeartbeatTimeMillis by mutableStateOf(currentTimeMillis())
 
     init {
@@ -61,23 +63,37 @@ class FocusEngine private constructor() {
     fun checkAndUpdatePermissions(): Boolean {
         val hasAccess = com.focal.app.ui.components.PlatformPermissionsHelper.isAccessibilityEnabled()
         val hasOverlay = com.focal.app.ui.components.PlatformPermissionsHelper.isOverlayEnabled()
+        val hasAdmin = com.focal.app.ui.components.PlatformPermissionsHelper.isDeviceAdminActive()
+        val hasUsage = com.focal.app.ui.components.PlatformPermissionsHelper.isUsageAccessEnabled()
+        val hasNotif = com.focal.app.ui.components.PlatformPermissionsHelper.isNotificationPermissionGranted()
+        val hasBat = com.focal.app.ui.components.PlatformPermissionsHelper.isBatteryOptimizationDisabled()
+        val hasAlarm = com.focal.app.ui.components.PlatformPermissionsHelper.isExactAlarmPermissionGranted()
+
+        val missingList = mutableListOf<String>()
+        if (!hasAccess) missingList.add("Accessibility")
+        if (!hasOverlay) missingList.add("Display over other apps")
+        if (!hasAdmin) missingList.add("Uninstall protection")
+        if (!hasUsage) missingList.add("Usage access")
+        if (!hasNotif) missingList.add("Notifications")
+
+        val warningList = mutableListOf<String>()
+        if (!hasBat) warningList.add("Battery: Unrestricted")
+        if (!hasAlarm) warningList.add("Alarms & reminders")
 
         val previousState = isProtectionActive
         isAccessibilityGranted = hasAccess
         isOverlayGranted = hasOverlay
-        isProtectionActive = hasAccess && hasOverlay
+        isProtectionActive = missingList.isEmpty()
+        missingPermissionsList = missingList
         lastHeartbeatTimeMillis = currentTimeMillis()
 
         if (!isProtectionActive) {
             protectionStatusText = "Protection Disabled"
             if (previousState) {
                 val childName = currentSession?.childName ?: repository.currentUser.name
-                val missingList = mutableListOf<String>()
-                if (!hasAccess) missingList.add("Accessibility")
-                if (!hasOverlay) missingList.add("Overlay")
-                val missingStr = missingList.joinToString("/")
+                val missingStr = missingList.joinToString(", ")
 
-                val notifMessage = "Focus Protection Disabled — ${childName}'s device has disabled $missingStr permission. FOCAL restrictions may not be fully enforced."
+                val notifMessage = "Focus Protection Disabled — ${childName}'s device has disabled $missingStr. FOCAL restrictions may not be fully enforced."
 
                 repository.notifications.add(0, NotificationItem(
                     id = "notif_perm_${currentTimeMillis()}",
@@ -102,7 +118,7 @@ class FocusEngine private constructor() {
                     childId = repository.currentUser.id,
                     protectionStatus = "Protection Active",
                     isAccessibilityGranted = true,
-                    isOverlayGranted = true
+                    isOverlayGranted = hasOverlay
                 )
             }
         }
@@ -204,6 +220,18 @@ class FocusEngine private constructor() {
 
         currentSession = newSession
         sessionState = SessionState.ACTIVE
+
+        val resolvedPkgs = policy.blockedApps.map { com.focal.app.protection.ProtectionEngine.APP_NAME_TO_PACKAGE[it] ?: it }.toSet()
+        com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
+            active = true,
+            endsAtElapsed = currentTimeMillis() + totalSeconds * 1000L,
+            policy = com.focal.app.model.FocusPolicyData(
+                blockedApps = policy.blockedApps,
+                blockedPackages = resolvedPkgs,
+                blockedWebsites = policy.blockedWebsites
+            )
+        )
+
         startTimer()
 
         // Push real-time telemetry to Cloud Sync Engine for Controller Device
@@ -361,6 +389,12 @@ class FocusEngine private constructor() {
         remainingSeconds = 0
         sessionState = SessionState.COMPLETED
 
+        com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
+            active = false,
+            endsAtElapsed = 0L,
+            policy = com.focal.app.model.FocusPolicyData()
+        )
+
         // Notify controller
         repository.notifications.add(0, NotificationItem(
             id = "notif_${currentTimeMillis()}",
@@ -385,6 +419,11 @@ class FocusEngine private constructor() {
         )
         currentSession = null
         sessionState = SessionState.COMPLETED
+        com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
+            active = false,
+            endsAtElapsed = 0L,
+            policy = com.focal.app.model.FocusPolicyData()
+        )
     }
 
     // Trigger opening a blocked app / website in real native service or simulation

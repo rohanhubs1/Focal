@@ -20,6 +20,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
+import com.focal.app.data.FocalRepository
+import com.focal.app.ui.components.PlatformPermissionsHelper
+
 class FocusForegroundService : Service() {
 
     companion object {
@@ -80,9 +85,57 @@ class FocusForegroundService : Service() {
                     stopSelf()
                     break
                 }
+                
+                // Backup 1-second UsageStatsManager detector
+                checkForegroundAppBackup(engine)
+
                 notificationManager.notify(NOTIFICATION_ID, buildNotification())
                 delay(1000)
             }
+        }
+    }
+
+    private fun checkForegroundAppBackup(engine: FocusEngine) {
+        val state = com.focal.app.protection.ProtectionStateRepository.instance.state.value
+        if (!state.focusActive) return
+        val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return
+        val nowMs = System.currentTimeMillis()
+        val events = usageStatsManager.queryEvents(nowMs - 3000L, nowMs) ?: return
+
+        var fgPkg: String? = null
+        val event = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
+                event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                fgPkg = event.packageName
+            }
+        }
+
+        val topPkg = fgPkg ?: return
+        val nowElapsed = android.os.SystemClock.elapsedRealtime()
+        val windowInfo = com.focal.app.protection.WindowInfo(
+            packageName = topPkg,
+            windowClass = "",
+            fullText = "",
+            urlText = null
+        )
+
+        val decision = com.focal.app.protection.ProtectionEngine.decide(
+            windowInfo = windowInfo,
+            state = state,
+            nowElapsed = nowElapsed,
+            ownPackage = packageName
+        )
+
+        if (decision !is com.focal.app.protection.ProtectionDecision.Allow) {
+            ActionExecutor.execute(
+                context = applicationContext,
+                accessibilityService = FocalAccessibilityService.instance,
+                windowInfo = windowInfo,
+                decision = decision,
+                currentElapsed = nowElapsed
+            )
         }
     }
 

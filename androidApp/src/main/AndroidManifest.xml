@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -42,6 +44,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Fallback Block Activity -->
+        <activity
+            android:name=".service.BlockActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
+
         <!-- Native Accessibility Service for Real App & Website Blocking -->
         <service
             android:name=".service.FocalAccessibilityService"
@@ -64,17 +73,12 @@
 
         <!-- Device Admin Receiver for Uninstall Protection -->
         <receiver
-            android:name=".receiver.FocalDeviceAdminReceiver"
-            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:name=".protection.FocalDeviceAdminReceiver"
             android:exported="true"
-            android:label="FOCAL Protection Admin">
-            <meta-data
-                android:name="android.app.device_admin"
-                android:resource="@xml/device_admin_config" />
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin" />
             <intent-filter>
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-                <action android:name="android.app.action.DEVICE_ADMIN_DISABLE_REQUESTED" />
-                <action android:name="android.app.action.DEVICE_ADMIN_DISABLED" />
             </intent-filter>
         </receiver>
 
@@ -85,6 +89,19 @@
             <intent-filter>
                 <action android:name="com.focal.app.ACTION_START_SCHEDULE" />
                 <action android:name="com.focal.app.ACTION_END_SCHEDULE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Boot & Clock Change Receiver for Persistence -->
+        <receiver
+            android:name=".receiver.FocalBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
 

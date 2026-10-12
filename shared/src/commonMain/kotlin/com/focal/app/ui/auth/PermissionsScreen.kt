@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -135,10 +136,19 @@ fun ChildPermissionsSetupScreen(
     var hasExactAlarm by remember { mutableStateOf(PlatformPermissionsHelper.isExactAlarmPermissionGranted()) }
     var hasDeviceAdmin by remember { mutableStateOf(PlatformPermissionsHelper.isDeviceAdminActive()) }
 
+    var deviceAdminAttemptCount by remember { mutableStateOf(0) }
+
+    val launchDeviceAdmin = rememberDeviceAdminLauncher { isActive ->
+        hasDeviceAdmin = isActive
+        if (!isActive) {
+            deviceAdminAttemptCount++
+        }
+    }
+
     val hasNfcHardware = remember { PlatformPermissionsHelper.hasNfcHardware() }
     var hasNfcEnabled by remember { mutableStateOf(PlatformPermissionsHelper.isNfcEnabled()) }
 
-    // Auto-refresh permission status every 2 seconds and on resume
+    // Passive refresh permission status
     LaunchedEffect(Unit) {
         while (true) {
             hasAccessibility = PlatformPermissionsHelper.isAccessibilityEnabled()
@@ -149,7 +159,7 @@ fun ChildPermissionsSetupScreen(
             hasExactAlarm = PlatformPermissionsHelper.isExactAlarmPermissionGranted()
             hasDeviceAdmin = PlatformPermissionsHelper.isDeviceAdminActive()
             hasNfcEnabled = PlatformPermissionsHelper.isNfcEnabled()
-            delay(2000)
+            delay(1500)
         }
     }
 
@@ -158,18 +168,53 @@ fun ChildPermissionsSetupScreen(
     val totalRequired = requiredStatusList.size
     val allGranted = grantedCount == totalRequired
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .windowInsetsPadding(WindowInsets.systemBars)
-            .padding(horizontal = 20.dp, vertical = 20.dp)
-    ) {
+    Scaffold(
+        containerColor = Color.Black,
+        contentWindowInsets = WindowInsets.systemBars,
+        bottomBar = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.Black)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+            ) {
+                HorizontalDivider(color = Color(0xFF333333), thickness = 1.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 14.dp)
+                ) {
+                    Text(
+                        text = "$grantedCount of $totalRequired done",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = FocalColors.TextSecondary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center
+                        ),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                    )
+
+                    PrimaryButton(
+                        text = "Continue",
+                        enabled = allGranted,
+                        onClick = onPermissionsComplete,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    ) { paddingValues ->
         Column(
-            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 90.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .verticalScroll(rememberScrollState())
+                .padding(paddingValues)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             StatusBadge(
                 text = "$grantedCount OF $totalRequired DONE",
@@ -225,7 +270,7 @@ fun ChildPermissionsSetupScreen(
             // 2. Display Over Other Apps (Overlay)
             PermissionRowItem(
                 title = "2. Display over other apps",
-                description = "Shows the focus screen shield over blocked apps",
+                description = "Shows the focus screen over blocked apps",
                 isGranted = hasOverlay,
                 onTap = { PlatformPermissionsHelper.openOverlaySettings() }
             )
@@ -260,6 +305,29 @@ fun ChildPermissionsSetupScreen(
                 onTap = { PlatformPermissionsHelper.openBatteryOptimizationSettings() }
             )
 
+            if (!hasBatteryOpt) {
+                Spacer(modifier = Modifier.height(6.dp))
+                FocalCard(modifier = Modifier.fillMaxWidth(), padding = 12.dp) {
+                    Column {
+                        Text(
+                            text = "ColorOS / Xiaomi / Samsung / Vivo note:",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Also allow 'Background Activity' & 'Auto launch' in App Info → Battery to stop OS from killing FOCAL.",
+                            style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        SecondaryButton(
+                            text = "Open App Battery Settings",
+                            onClick = { PlatformPermissionsHelper.openAppDetailsSettings() },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
 
             // 6. Exact Alarms
@@ -277,8 +345,34 @@ fun ChildPermissionsSetupScreen(
                 title = "7. Uninstall protection",
                 description = "Stops FOCAL from being removed silently",
                 isGranted = hasDeviceAdmin,
-                onTap = { PlatformPermissionsHelper.openDeviceAdminSettings() }
+                onTap = {
+                    deviceAdminAttemptCount++
+                    launchDeviceAdmin()
+                }
             )
+
+            if (!hasDeviceAdmin && deviceAdminAttemptCount >= 1) {
+                Spacer(modifier = Modifier.height(6.dp))
+                FocalCard(modifier = Modifier.fillMaxWidth(), padding = 12.dp) {
+                    Column {
+                        Text(
+                            text = "Turn it on manually:",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Search 'Device admin apps' → FOCAL → Activate",
+                            style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.TextSecondary)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        SecondaryButton(
+                            text = "Open Security Settings",
+                            onClick = { PlatformPermissionsHelper.openSecuritySettings() },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(14.dp))
 
@@ -299,27 +393,7 @@ fun ChildPermissionsSetupScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-        }
-
-        // Bottom Action Bar: Continue enabled ONLY when ALL 7 required permissions are enabled
-        Column(
-            modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter)
-        ) {
-            if (!allGranted) {
-                Text(
-                    text = "Grant all 7 required permissions to complete setup",
-                    style = MaterialTheme.typography.labelSmall.copy(color = FocalColors.Danger, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
-                )
-            }
-
-            PrimaryButton(
-                text = if (allGranted) "Continue" else "$grantedCount of $totalRequired Enabled",
-                enabled = allGranted,
-                onClick = onPermissionsComplete,
-                modifier = Modifier.fillMaxWidth()
-            )
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
@@ -416,12 +490,66 @@ private fun PermissionRowItem(
     isGranted: Boolean,
     onTap: () -> Unit
 ) {
-    FocalListRow(
-        title = title,
-        subtitle = description,
-        icon = if (isGranted) FocalIcons.Check else FocalIcons.Lock,
-        trailingText = if (isGranted) "✓ Granted" else "Allow",
-        onClick = onTap,
-        modifier = Modifier.fillMaxWidth()
-    )
+    FocalCard(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(FocalColors.Surface)
+                        .border(1.dp, FocalColors.Border, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isGranted) FocalIcons.Check else FocalIcons.Lock,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall.copy(color = FocalColors.TextSecondary)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            if (isGranted) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "✓ Allowed",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    )
+                }
+            } else {
+                SecondaryButton(
+                    text = "Allow",
+                    onClick = onTap,
+                    modifier = Modifier.width(80.dp)
+                )
+            }
+        }
+    }
 }

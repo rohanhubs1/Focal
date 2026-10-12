@@ -82,7 +82,7 @@ fun AdminDashboardScreen(
                 .padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            listOf("Overview", "Users", "Devices", "Cards", "Revenue").forEach { tab ->
+            listOf("Overview", "Users", "Devices", "Cards", "Revenue", "Log").forEach { tab ->
                 val isSelected = activeAdminTab == tab
                 Box(
                     modifier = Modifier
@@ -119,6 +119,7 @@ fun AdminDashboardScreen(
                 onProgramCardsClick = { showProgrammerModal = true }
             )
             "Revenue" -> AdminRevenueTab(repository = repository)
+            "Log" -> ProtectionLogScreen()
         }
     }
 

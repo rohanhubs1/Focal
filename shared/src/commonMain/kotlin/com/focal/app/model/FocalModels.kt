@@ -138,6 +138,13 @@ data class FocusPolicy(
     val parentApprovalRequired: Boolean = true
 )
 
+data class FocusPolicyData(
+    val blockedApps: List<String> = emptyList(),
+    val blockedPackages: Set<String> = emptySet(),
+    val blockedCategories: Set<String> = emptySet(),
+    val blockedWebsites: List<String> = emptyList()
+)
+
 data class FocusSession(
     val id: String,
     val userId: String,
