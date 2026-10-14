@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -16,12 +16,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.focal.app.data.FocalLocalStorage
 import com.focal.app.data.FocalRepository
 import com.focal.app.engine.FocusEngine
 import com.focal.app.model.SessionState
 import com.focal.app.model.UserRole
 import com.focal.app.theme.FocalColors
-
 
 @Composable
 fun RoleSwitcherModal(
@@ -119,7 +119,48 @@ fun RoleSwitcherModal(
                     }
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                var clientDemoEnabled by remember {
+                    mutableStateOf(FocalLocalStorage.getBoolean("KEY_CLIENT_DEMO_MODE", false))
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF141414))
+                        .border(1.dp, Color(0xFF262626), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Client demo",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                        )
+                        Text(
+                            text = "Hides DEV badge for clean presentation",
+                            style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFA3A3A3))
+                        )
+                    }
+                    Switch(
+                        checked = clientDemoEnabled,
+                        onCheckedChange = { isChecked ->
+                            clientDemoEnabled = isChecked
+                            FocalLocalStorage.saveBoolean("KEY_CLIENT_DEMO_MODE", isChecked)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFF333333),
+                            uncheckedThumbColor = Color(0xFF6B6B6B),
+                            uncheckedTrackColor = Color(0xFF1F1F1F)
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
 
                 if (onOpenComponentGallery != null) {
                     PrimaryButton(

@@ -106,6 +106,8 @@ data class ChildProfile(
     val streakDays: Int = 12,
     val currentSessionId: String? = null,
     val remainingMinutes: Int = 0,
+    val focusEndsAtMillis: Long = 0L,
+    val focusTotalMinutes: Int = 90,
     val pairedCardId: String? = "FC0001",
     val deviceName: String = "Rahul's Galaxy Tab S9",
     val cardCustodyMode: String = "Card stays with child" // "Card stays with child" (default) or "I keep the card"
@@ -180,7 +182,10 @@ data class FocusSession(
     val focusScore: Int = 85,
     val blockedAppsCount: Int = 7,
     val blockedWebsitesCount: Int = 12
-)
+) {
+    val endTimeMillis: Long
+        get() = startTimeMillis + (targetDurationMinutes * 60 * 1000L)
+}
 
 data class FocusCard(
     val id: String,

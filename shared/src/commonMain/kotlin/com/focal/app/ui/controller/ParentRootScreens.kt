@@ -309,8 +309,7 @@ fun ParentActivityScreen(
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = if (isProtectionOff) Color(0xFFFF453A) else Color.White
                                             ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            maxLines = 2
                                         )
 
                                         Spacer(Modifier.height(2.dp))
@@ -321,8 +320,7 @@ fun ParentActivityScreen(
                                                 fontSize = 12.sp,
                                                 color = ChildColors.Secondary
                                             ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            maxLines = 2
                                         )
                                     }
 

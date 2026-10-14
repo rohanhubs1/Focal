@@ -132,7 +132,10 @@ fun ParentProfileRootFlow(
             )
             ParentProfileSubScreen.PLAN -> ParentPlanScreen(
                 onBack = { currentSubScreen = null },
-                onGoToFocusTab = onGoToFocusTab,
+                onGoToFocusTab = {
+                    currentSubScreen = null
+                    onGoToFocusTab()
+                },
                 repository = repository
             )
             ParentProfileSubScreen.CHILDREN_LIST -> ParentChildrenListScreen(
@@ -186,6 +189,7 @@ fun ParentProfileRootFlow(
 // =========================================================================
 // SCREEN 1 — PROFILE TAB (PF1_profile.png)
 // =========================================================================
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ParentProfileTabScreen(
     onNavigateSubScreen: (ParentProfileSubScreen) -> Unit,
@@ -198,6 +202,7 @@ fun ParentProfileTabScreen(
     val subRepo = DemoSubscriptionRepository.instance
     val subDetails = subRepo.getSubscriptionDetails(user)
     var showSignOutConfirm by remember { mutableStateOf(false) }
+    var showInviteComingSoonSheet by remember { mutableStateOf(false) }
 
     val linkedChildrenNames = remember(repository.childrenList.size) {
         if (repository.childrenList.isEmpty()) "No children linked"
@@ -223,6 +228,13 @@ fun ParentProfileTabScreen(
             subDetails.isTrial -> "Free trial · ${subDetails.trialDaysRemaining} days left · then ${FocalPricingConfig.PLAN_PRICE_PER_MONTH}"
             else -> "Renews ${subDetails.renewalDate} · ${FocalPricingConfig.PLAN_PRICE_PER_MONTH}"
         }
+    }
+
+    val planLine1 = remember(subDetails) {
+        if (subDetails.isTrial) "Free trial · ${subDetails.trialDaysRemaining} days left" else "FOCAL Family"
+    }
+    val planLine2 = remember(subDetails) {
+        if (subDetails.isTrial) "Then ₹299/month" else billingStatusLine
     }
 
     Box(
@@ -275,8 +287,7 @@ fun ParentProfileTabScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
@@ -285,8 +296,7 @@ fun ParentProfileTabScreen(
                                 fontSize = 13.sp,
                                 color = ChildColors.Secondary
                             ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                     }
                     StatusPill(
@@ -332,24 +342,22 @@ fun ParentProfileTabScreen(
                         Spacer(modifier = Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "FOCAL Family",
+                                text = planLine1,
                                 style = typography.title.copy(
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color.White
                                 ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                maxLines = 2
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = billingStatusLine,
+                                text = planLine2,
                                 style = typography.caption.copy(
                                     fontSize = 13.sp,
                                     color = ChildColors.Secondary
                                 ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                maxLines = 2
                             )
                         }
                         Icon(
@@ -386,7 +394,7 @@ fun ParentProfileTabScreen(
                     title = "Invite another parent",
                     subtitle = "Share control of the family",
                     icon = { Icon(FocalIcons.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp)) },
-                    onClick = { onNavigateSubScreen(ParentProfileSubScreen.INVITE_PARENT) }
+                    onClick = { showInviteComingSoonSheet = true }
                 )
             }
 
@@ -539,6 +547,82 @@ fun ParentProfileTabScreen(
             }
         }
     }
+
+    // Invite another parent Coming soon bottom sheet
+    if (showInviteComingSoonSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showInviteComingSoonSheet = false },
+            containerColor = Color(0xFF0F0F0F),
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 12.dp, bottom = 8.dp)
+                        .size(width = 36.dp, height = 4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color(0xFF333333))
+                )
+            }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 36.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(ChildColors.IconCircleBg)
+                        .border(1.dp, ChildColors.BorderStrong, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = FocalIcons.Users,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Text(
+                    text = "Coming soon",
+                    style = typography.title.copy(
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    ),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Soon you'll be able to invite another parent to share control of your family.",
+                    style = typography.caption.copy(
+                        fontSize = 14.sp,
+                        color = ChildColors.Secondary,
+                        lineHeight = 20.sp
+                    ),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(28.dp))
+
+                SecondaryButton(
+                    text = "OK",
+                    onClick = { showInviteComingSoonSheet = false },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
 }
 
 // =========================================================================
@@ -675,14 +759,14 @@ fun ParentFocalCardScreen(
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color.White
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
                                 Spacer(modifier = Modifier.height(3.dp))
                                 val lastUsedText = if (!card.isEnabled || card.status == CardStatus.DISABLED) {
                                     "Disabled"
                                 } else if (card.lastUsed.isNotBlank()) {
-                                    "Last used ${card.lastUsed.lowercase()} · ${card.lastUsedChildName ?: "Aarav"}"
+                                    val childPart = if (!card.lastUsedChildName.isNullOrBlank()) " · ${card.lastUsedChildName}" else ""
+                                    "Last used ${card.lastUsed.lowercase()}$childPart"
                                 } else {
                                     "Not used yet"
                                 }
@@ -692,8 +776,7 @@ fun ParentFocalCardScreen(
                                         fontSize = 12.sp,
                                         color = if (!card.isEnabled || card.status == CardStatus.DISABLED) Color(0xFFFF453A) else ChildColors.Secondary
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
                             }
 
@@ -735,8 +818,7 @@ fun ParentFocalCardScreen(
                         Text(
                             text = allChildrenNames,
                             style = typography.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                     }
                 }
@@ -1394,7 +1476,7 @@ fun ParentPlanScreen(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     PlanBulletRow("Tap to start and end focus")
-                    PlanBulletRow("Works offline")
+                    PlanBulletRow("Can't be copied")
                     PlanBulletRow("Includes 3 months free app access")
                 }
             }
@@ -1682,8 +1764,7 @@ fun ParentChildrenListScreen(
                             Text(
                                 text = child.displayGrade,
                                 style = typography.caption.copy(fontSize = 12.sp, color = ChildColors.Secondary),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                maxLines = 2
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1702,8 +1783,7 @@ fun ParentChildrenListScreen(
                                 Text(
                                     text = statusText,
                                     style = typography.caption.copy(fontSize = 12.sp, color = ChildColors.Secondary),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
                             }
                         }

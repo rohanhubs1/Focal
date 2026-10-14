@@ -72,7 +72,7 @@ fun FocalQrCodeCard(
     bracketCornerRadius: Dp = 18.dp,
     bracketArmLength: Dp = 24.dp,
     bracketStrokeWidth: Dp = 3.dp,
-    contentSize: Dp = 200.dp
+    contentSize: Dp = 220.dp
 ) {
     val totalSize = contentSize + 32.dp
 
@@ -156,6 +156,10 @@ fun FocalQrCodeCard(
             drawPath(brPath, bracketColor, style = Stroke(width = strokePx, cap = StrokeCap.Round))
         }
 
+        val qrBitmap = remember(payload) {
+            com.focal.app.ui.components.PlatformQrGenerator.generateQrBitmap(payload, 512)
+        }
+
         // Centered white rounded tile containing QR code
         Box(
             modifier = Modifier
@@ -165,12 +169,21 @@ fun FocalQrCodeCard(
                 .padding(tilePadding),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = FocalIcons.QrCode,
-                contentDescription = payload,
-                tint = if (isDimmed) Color.Black.copy(alpha = 0.35f) else Color.Black,
-                modifier = Modifier.fillMaxSize()
-            )
+            if (qrBitmap != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = qrBitmap,
+                    contentDescription = payload,
+                    modifier = Modifier.fillMaxSize(),
+                    alpha = if (isDimmed) 0.35f else 1f
+                )
+            } else {
+                Icon(
+                    imageVector = FocalIcons.QrCode,
+                    contentDescription = payload,
+                    tint = if (isDimmed) Color.Black.copy(alpha = 0.35f) else Color.Black,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }
@@ -301,9 +314,7 @@ fun ParentFocusTabScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 displayChildren.forEachIndexed { index, ch ->
                                     val initials = remember(ch.name) {
-                                        val parts = ch.name.trim().split(" ").filter { it.isNotBlank() }
-                                        if (parts.size >= 2) "${parts.first().firstOrNull() ?: ""}${parts.last().firstOrNull() ?: ""}".uppercase()
-                                        else ch.name.take(2).uppercase().ifEmpty { "CH" }
+                                        com.focal.app.ui.child.components.getAvatarInitials(ch.name)
                                     }
 
                                     Box(
@@ -358,18 +369,16 @@ fun ParentFocusTabScreen(
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color.White
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    text = "Pick a child, a policy and how long",
+                                    text = "Child, policy and time",
                                     style = typography.caption.copy(
                                         fontSize = 13.sp,
                                         color = ChildColors.Secondary
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
                             }
                         }
@@ -388,7 +397,7 @@ fun ParentFocusTabScreen(
                                 )
                             },
                             onClick = { showStartFocusSheet = true },
-                            modifier = Modifier.fillMaxWidth().height(50.dp)
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                         )
                     }
                 }
@@ -430,18 +439,18 @@ fun ParentFocusTabScreen(
                         // Framed QR code
                         FocalQrCodeCard(
                             payload = familyQr.qrPayload,
-                            contentSize = 196.dp
+                            contentSize = 220.dp
                         )
 
                         Spacer(Modifier.height(22.dp))
 
-                        // Two SecondaryButtons side-by-side: "Share / print" | "Reset QR"
+                        // Two SecondaryButtons side-by-side: "Share" | "Reset"
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             SecondaryButton(
-                                text = "Share / print",
+                                text = "Share",
                                 leadingIcon = {
                                     Icon(
                                         imageVector = FocalIcons.Share,
@@ -456,11 +465,11 @@ fun ParentFocusTabScreen(
                                         payload = familyQr.qrPayload
                                     )
                                 },
-                                modifier = Modifier.weight(1f).height(44.dp)
+                                modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                             )
 
                             SecondaryButton(
-                                text = "Reset QR",
+                                text = "Reset",
                                 leadingIcon = {
                                     Icon(
                                         imageVector = FocalIcons.Refresh,
@@ -470,7 +479,7 @@ fun ParentFocusTabScreen(
                                     )
                                 },
                                 onClick = { showResetConfirmDialog = true },
-                                modifier = Modifier.weight(1f).height(44.dp)
+                                modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                             )
                         }
 
@@ -542,13 +551,13 @@ fun ParentFocusTabScreen(
                             )
 
                             PrimaryButton(
-                                text = "Reset QR",
+                                text = "Reset",
                                 onClick = {
                                     focusQrRepository.resetFamilyQr(repository.currentUser.id.ifBlank { "family_1" })
                                     PlatformPermissionsHelper.showToast("Family QR has been reset.")
                                     showResetConfirmDialog = false
                                 },
-                                modifier = Modifier.weight(1f).height(46.dp)
+                                modifier = Modifier.weight(1f).heightIn(min = 46.dp)
                             )
                         }
                     }
@@ -579,17 +588,7 @@ fun AddChildStep1Screen(
 
     // Live initials computation
     val initials = remember(name) {
-        val trimmed = name.trim()
-        if (trimmed.isBlank()) {
-            "?"
-        } else {
-            val parts = trimmed.split(" ").filter { it.isNotBlank() }
-            if (parts.size >= 2) {
-                "${parts.first().firstOrNull() ?: ""}${parts.last().firstOrNull() ?: ""}".uppercase()
-            } else {
-                trimmed.take(2).uppercase()
-            }
-        }
+        if (name.isBlank()) "?" else com.focal.app.ui.child.components.getAvatarInitials(name)
     }
 
     // Check duplicate name
@@ -833,7 +832,8 @@ fun ConnectPhoneScreen(
     childName: String,
     onBack: () -> Unit,
     onAllowSuccess: () -> Unit,
-    pairingRepository: PairingRepository = PairingRepository.instance
+    pairingRepository: PairingRepository = PairingRepository.instance,
+    repository: FocalRepository = FocalRepository.instance
 ) {
     val typography = LocalChildTypography.current
     var showCancelConfirmDialog by remember { mutableStateOf(false) }
@@ -985,7 +985,7 @@ fun ConnectPhoneScreen(
                     FocalQrCodeCard(
                         payload = qrPayload,
                         isDimmed = isExpired,
-                        contentSize = 186.dp
+                        contentSize = 220.dp
                     )
 
                     Spacer(Modifier.height(18.dp))
@@ -1142,6 +1142,39 @@ fun ConnectPhoneScreen(
                     }
                 }
             }
+
+            Spacer(Modifier.height(18.dp))
+
+            // Demo connection confirmation button
+            SecondaryButton(
+                text = "${childName}'s phone is connected",
+                onClick = {
+                    val childIdx = repository.childrenList.indexOfFirst { it.id == childId }
+                    if (childIdx >= 0) {
+                        val child = repository.childrenList[childIdx]
+                        repository.childrenList[childIdx] = child.copy(
+                            isOnline = true,
+                            pairedCardId = "FC0001",
+                            deviceName = "Realme · Android 14"
+                        )
+                    }
+                    pairingRepository.approveChildPairing(childId)
+                    onAllowSuccess()
+                },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = "Demo mode · tap when your child's phone shows Connected",
+                style = typography.caption.copy(
+                    fontSize = 12.sp,
+                    color = Color(0xFF6B6B6B)
+                ),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
 
             if (showCopiedSnackbar) {
                 Spacer(Modifier.height(12.dp))

@@ -26,6 +26,9 @@ dependencies {
     implementation(libs.mlkit.barcode.scanning)
     // BouncyCastle for NXP secp128r1 curve originality verification
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+
+    // AndroidX Core SplashScreen API
+    implementation("androidx.core:core-splashscreen:1.0.1")
 }
 
 android {
@@ -79,4 +82,8 @@ android {
 // Conditionally apply Google Services plugin if google-services.json is present
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.encoding = "UTF-8"
 }

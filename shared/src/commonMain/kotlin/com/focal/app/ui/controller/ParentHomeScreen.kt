@@ -11,6 +11,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
+import com.focal.app.model.currentTimeMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +60,14 @@ fun ParentHomeScreen(
     val hasUnreadEvents by activityRepository.hasUnread.collectAsState()
     val activeParentSession: com.focal.app.pairing.ParentPairingSession? by com.focal.app.pairing.PairingRepository.instance.activeParentSessionFlow.collectAsState()
     var showAllowPhoneSheet by remember { mutableStateOf(false) }
+    var showStartFocusSheet by remember { mutableStateOf(false) }
+    var tickerNow: Long by remember { mutableStateOf(currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            tickerNow = currentTimeMillis()
+        }
+    }
     val notificationPromptShown = remember {
         com.focal.app.data.FocalLocalStorage.getBoolean("KEY_PARENT_NOTIFICATION_PROMPT_SHOWN", false)
     }
@@ -80,7 +90,7 @@ fun ParentHomeScreen(
                 .padding(horizontal = 20.dp, vertical = 20.dp)
                 .padding(bottom = 110.dp)
         ) {
-            // Header row: 48dp parent initials avatar Â· Greeting / First name Â· 44dp bell button
+            // Header row: 48dp parent initials avatar · Greeting / First name · 44dp bell button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -88,9 +98,7 @@ fun ParentHomeScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val parentInitials = remember(user.name) {
-                        val parts = user.name.trim().split(" ").filter { it.isNotBlank() }
-                        if (parts.size >= 2) "${parts.first().firstOrNull() ?: ""}${parts.last().firstOrNull() ?: ""}".uppercase()
-                        else user.name.take(2).uppercase().ifEmpty { "PS" }
+                        com.focal.app.ui.child.components.getAvatarInitials(user.name.ifBlank { "Priya Sharma" })
                     }
 
                     Box(
@@ -196,7 +204,7 @@ fun ParentHomeScreen(
                         .padding(18.dp)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // Overline row: â— EMERGENCY EXIT REQUEST        2 min ago
+                        // Overline row: ● EMERGENCY EXIT REQUEST        2 min ago
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -232,7 +240,7 @@ fun ParentHomeScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Child info row: initials avatar Â· Name Â· "Reason" / Policy Â· min left
+                        // Child info row: initials avatar · Name · "Reason" / Policy · min left
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -259,24 +267,22 @@ fun ParentHomeScreen(
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "${req.childName} Â· \"${req.reason}\"",
+                                    text = "${req.childName} · \"${req.reason}\"",
                                     style = typography.headline.copy(
                                         fontSize = 15.5.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color.White
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "$policyName Â· $remainingLeft",
+                                    text = "$policyName · $remainingLeft",
                                     style = typography.caption.copy(
                                         fontSize = 13.sp,
                                         color = Color(0xFFA3A3A3)
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
                             }
                         }
@@ -352,7 +358,7 @@ fun ParentHomeScreen(
                         .padding(18.dp)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // Overline row: â— NEW PHONE        Just now
+                        // Overline row: ● NEW PHONE        Just now
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -388,7 +394,7 @@ fun ParentHomeScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Child info row: initials avatar Â· "{child}'s phone wants to connect" / "{manufacturer} Â· Android {ver}"
+                        // Child info row: initials avatar · "{child}'s phone wants to connect" / "{manufacturer} · Android {ver}"
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -421,18 +427,16 @@ fun ParentHomeScreen(
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color.White
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "${pairSession.deviceManufacturer} Â· Android ${pairSession.androidVersion}",
+                                    text = "${pairSession.deviceManufacturer} · Android ${pairSession.androidVersion}",
                                     style = typography.caption.copy(
                                         fontSize = 13.sp,
                                         color = Color(0xFFA3A3A3)
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
                             }
                         }
@@ -558,9 +562,7 @@ fun ParentHomeScreen(
             } else {
                 repository.childrenList.forEach { child ->
                     val initials = remember(child.name) {
-                        val parts = child.name.trim().split(" ").filter { it.isNotBlank() }
-                        if (parts.size >= 2) "${parts.first().firstOrNull() ?: ""}${parts.last().firstOrNull() ?: ""}".uppercase()
-                        else child.name.take(2).uppercase().ifEmpty { "CH" }
+                        com.focal.app.ui.child.components.getAvatarInitials(child.name)
                     }
 
                     GlassCard(
@@ -615,8 +617,7 @@ fun ParentHomeScreen(
                                         fontSize = 12.sp,
                                         color = ChildColors.Secondary
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
 
                                 Spacer(modifier = Modifier.height(4.dp))
@@ -625,7 +626,7 @@ fun ParentHomeScreen(
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    val isProtectionOff = child.isProtectionOff || (repository.isProtectionDisabledOnChild && child.id == "child_1")
+                                    val isProtectionOff = repository.isChildProtectionOff(child.id)
                                     if (isProtectionOff) {
                                         Box(
                                             modifier = Modifier
@@ -640,8 +641,7 @@ fun ParentHomeScreen(
                                                 fontSize = 13.sp,
                                                 color = Color(0xFFFF453A)
                                             ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            maxLines = 2
                                         )
                                     } else if (child.deviceName.isBlank()) {
                                         Box(
@@ -657,28 +657,48 @@ fun ParentHomeScreen(
                                                 fontSize = 13.sp,
                                                 color = Color(0xFF6B6B6B)
                                             ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            maxLines = 2
                                         )
                                     } else if (child.isFocusing) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(6.dp)
-                                                .clip(CircleShape)
-                                                .background(Color.White)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
                                         val pName = repository.policies.find { it.id == child.defaultPolicyId }?.name ?: "Study Mode"
-                                        val rem = if (child.remainingMinutes > 0) child.remainingMinutes else 42
-                                        Text(
-                                            text = "Focusing Â· $pName Â· ${rem}m left",
-                                            style = typography.caption.copy(
-                                                fontSize = 13.sp,
-                                                color = Color(0xFFA3A3A3)
-                                            ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        val remSecs = if (child.focusEndsAtMillis > 0L) maxOf(0L, (child.focusEndsAtMillis - tickerNow) / 1000L) else (child.remainingMinutes * 60L).coerceAtLeast(0L)
+                                        val remMins = (remSecs + 59) / 60
+                                        if (remSecs > 0L) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(6.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.White)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "Focusing · $pName · ${remMins}m left",
+                                                style = typography.caption.copy(
+                                                    fontSize = 13.sp,
+                                                    color = Color(0xFFA3A3A3)
+                                                ),
+                                                maxLines = 2
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(6.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFF6B6B6B))
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            val hours = child.todayFocusMinutes / 60
+                                            val mins = child.todayFocusMinutes % 60
+                                            val timeStr = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+                                            Text(
+                                                text = "Not focusing · $timeStr today",
+                                                style = typography.caption.copy(
+                                                    fontSize = 13.sp,
+                                                    color = Color(0xFFA3A3A3)
+                                                ),
+                                                maxLines = 2
+                                            )
+                                        }
                                     } else {
                                         Box(
                                             modifier = Modifier
@@ -691,19 +711,18 @@ fun ParentHomeScreen(
                                         val mins = child.todayFocusMinutes % 60
                                         val timeStr = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
                                         Text(
-                                            text = "Not focusing Â· $timeStr today",
+                                            text = "Not focusing · $timeStr today",
                                             style = typography.caption.copy(
                                                 fontSize = 13.sp,
                                                 color = Color(0xFFA3A3A3)
                                             ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            maxLines = 2
                                         )
                                     }
                                 }
                             }
 
-                            // Chevron â€º
+                            // Chevron ›
                             Icon(
                                 imageVector = FocalIcons.ChevronRight,
                                 contentDescription = null,
@@ -799,122 +818,30 @@ fun ParentHomeScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        // Tile 1: Start now (âš¡)
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(72.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(Color(0xFF0B0B0B))
-                                .border(1.dp, Color(0xFF262626), RoundedCornerShape(18.dp))
-                                .clickable { onStartNowClick() }
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF171717)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = FocalIcons.Bolt,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(10.dp))
-
-                                Column {
-                                    Text(
-                                        text = "Start now",
-                                        style = typography.headline.copy(
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Color.White
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.height(1.dp))
-                                    Text(
-                                        text = "On their phone",
-                                        style = typography.caption.copy(
-                                            fontSize = 12.sp,
-                                            color = ChildColors.Secondary
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-
-                        // Tile 2: Focus QR (â–¦)
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(72.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(Color(0xFF0B0B0B))
-                                .border(1.dp, Color(0xFF262626), RoundedCornerShape(18.dp))
-                                .clickable { onOpenFocusTab() }
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF171717)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = FocalIcons.QrCode,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(10.dp))
-
-                                Column {
-                                    Text(
-                                        text = "Focus QR",
-                                        style = typography.headline.copy(
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Color.White
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.height(1.dp))
-                                    Text(
-                                        text = "They scan it",
-                                        style = typography.caption.copy(
-                                            fontSize = 12.sp,
-                                            color = ChildColors.Secondary
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    PrimaryButton(
+                        text = "Start focus",
+                        leadingIcon = {
+                            Icon(
+                                imageVector = FocalIcons.Bolt,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        onClick = { showStartFocusSheet = true },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    )
                 }
             }
+        }
+
+        // Modal: StartFocusSheet
+        if (showStartFocusSheet) {
+            StartFocusSheet(
+                preselectedChildId = null,
+                onDismiss = { showStartFocusSheet = false },
+                repository = repository
+            )
         }
 
         // First-open notification permission sheet (once per install)

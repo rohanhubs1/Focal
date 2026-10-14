@@ -217,7 +217,7 @@ fun QrScannerModal(
                                             onQrScanned(verified)
                                         },
                                         onFailure = { err ->
-                                            errorMessage = "Scanned QR: $rawToken (${err.message ?: "Invalid"})"
+                                            errorMessage = err.message ?: "That's not a FOCAL focus QR"
                                         }
                                     )
                                 }

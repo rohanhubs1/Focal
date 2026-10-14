@@ -128,15 +128,31 @@ class DefaultPairingRepository : PairingRepository {
         while (code in setOf("000000", "999999", "111111", "222222", "333333")) {
             code = (100000..999999).random().toString()
         }
-        val parent = FocalRepository.instance.controllerUser
+        val repo = FocalRepository.instance
+        val parent = repo.controllerUser
         val parentId = parent.id.ifBlank { "parent_01" }
+        val parentName = parent.name.ifBlank { "Priya Sharma" }
+        val child = repo.childrenList.find { it.id == childId }
+        val grade = child?.displayGrade ?: "Class 10"
+        val policyId = child?.defaultPolicyId ?: "pol_study"
+        val policy = repo.policies.find { it.id == policyId } ?: repo.policies.first()
+        val defaultFocusMins = child?.defaultFocusMinutes ?: 90
+        val expiresAt = now + 10 * 60 * 1000L
+
+        val appsJson = policy.blockedApps.joinToString(",") { "\"${it.replace("\"", "\\\"")}\"" }
+        val websitesJson = policy.blockedWebsites.joinToString(",") { "\"${it.replace("\"", "\\\"")}\"" }
+        val pairingJson = """{"familyId":"${parent.familyId.ifBlank { "family_1" }}","parentName":"$parentName","childId":"$childId","childName":"$childName","class":"$grade","defaultPolicy":{"name":"${policy.name}","apps":[$appsJson],"websites":[$websitesJson]},"defaultFocusMinutes":$defaultFocusMins,"schedules":[],"pairToken":"pt_$code","expiresAt":$expiresAt}"""
+
+        val base64Payload = Base64Url.encode(pairingJson)
+        val qrPayload = "focal://pair?code=$code&childId=$childId&v=1&d=$base64Payload"
+
         val session = ParentPairingSession(
             childId = childId,
             childName = childName,
             code = code,
-            qrPayload = "focal://pair?code=$code&childId=$childId&parentId=$parentId",
+            qrPayload = qrPayload,
             createdAtMs = now,
-            expiresAtMs = now + 10 * 60 * 1000L, // 10 min expiry
+            expiresAtMs = expiresAt,
             state = ParentPairState.WAITING,
             deviceManufacturer = "Realme",
             androidVersion = "14",
@@ -275,8 +291,8 @@ class DefaultPairingRepository : PairingRepository {
             return Result.success(req)
         }
 
-        // Allow test mock codes ("482910", "847291") or fallback when no session is registered
-        if (cleaned == "482910" || cleaned == "847291" || parentSessions.isEmpty()) {
+        // Allow test mock codes ("482910", "847291")
+        if (cleaned == "482910" || cleaned == "847291") {
             failedAttempts = 0
             val parent = FocalRepository.instance.controllerUser
             val parentName = if (parent.name.isNotBlank()) parent.name else "Priya Sharma"
@@ -305,13 +321,9 @@ class DefaultPairingRepository : PairingRepository {
             return Result.success(req)
         }
 
-        // If parent session was open but code didn't match
-        failedAttempts++
-        if (failedAttempts >= 5) {
-            lockoutUntilMs = now + 5 * 60 * 1000L
-            return Result.failure(Exception("Too many tries. Try again in 5 min."))
-        }
-        return Result.failure(Exception("That code didn't work. Check and try again."))
+        // 6-digit code in demo: works only when parent and child are on the SAME phone;
+        // on a different phone show "Use the QR in demo mode"
+        return Result.failure(Exception("Use the QR in demo mode"))
     }
 
     override suspend fun redeemQr(payload: String): Result<PairRequest> {
@@ -322,7 +334,77 @@ class DefaultPairingRepository : PairingRepository {
             return Result.failure(Exception("That's not a pairing QR"))
         }
 
-        // 2. Pairing QR with focal://pair?code=...
+        // 2. Reject non focal://pair and non FOCAL QR
+        if (!trimmed.startsWith("focal://pair", ignoreCase = true) && !trimmed.startsWith("FOCAL", ignoreCase = true)) {
+            return Result.failure(Exception("That's not a FOCAL QR"))
+        }
+
+        val now = currentTimeMillis()
+
+        // 3. Pairing QR with payload: focal://pair?v=1&d=...
+        if (trimmed.startsWith("focal://pair", ignoreCase = true) && trimmed.contains("d=")) {
+            val dParam = trimmed.substringAfter("d=").substringBefore("&").trim()
+            if (dParam.isNotBlank()) {
+                try {
+                    val jsonStr = Base64Url.decodeToString(dParam)
+                    val expiresAt = "\"expiresAt\"\\s*:\\s*([0-9]+)".toRegex().find(jsonStr)?.groupValues?.get(1)?.toLongOrNull() ?: (now + 10 * 60 * 1000L)
+                    if (now > expiresAt) {
+                        return Result.failure(Exception("This pairing QR has expired. Ask your parent for a new one."))
+                    }
+
+                    fun extractString(key: String): String =
+                        "\"$key\"\\s*:\\s*\"([^\"]*)\"".toRegex().find(jsonStr)?.groupValues?.get(1) ?: ""
+
+                    val familyId = extractString("familyId").ifBlank { "family_1" }
+                    val parentName = extractString("parentName").ifBlank { "Priya Sharma" }
+                    val childId = extractString("childId").ifBlank { "child_01" }
+                    val childName = extractString("childName").ifBlank { "Aarav" }
+                    val grade = extractString("class").ifBlank { "Class 10 · Student" }
+                    val pairToken = extractString("pairToken").ifBlank { "pt_qr" }
+
+                    val parentInitials = parentName.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").ifEmpty { "PS" }
+                    val childInitials = childName.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").ifEmpty { "AR" }
+
+                    // Save locally in demo mode - fully offline!
+                    val repo = FocalRepository.instance
+                    repo.controllerUser = repo.controllerUser.copy(name = parentName, familyId = familyId)
+                    repo.currentUser = repo.currentUser.copy(
+                        id = childId,
+                        name = childName,
+                        role = com.focal.app.model.UserRole.CHILD,
+                        familyId = familyId
+                    )
+                    FocalLocalStorage.saveBoolean(KEY_PAIRED_IS_PAIRED, true)
+                    FocalLocalStorage.saveBoolean("KEY_AUTH_DONE", true)
+                    FocalLocalStorage.saveString(KEY_PAIRED_CHILD_NAME, childName)
+                    FocalLocalStorage.saveString(KEY_PAIRED_PARENT_NAME, parentName)
+                    FocalLocalStorage.saveString(KEY_PAIRED_CARD_ID, "FC0001")
+                    FocalLocalStorage.saveString("KEY_ROLE", "CHILD")
+
+                    val req = PairRequest(
+                        id = "REQ_${now}_$pairToken",
+                        code = "QR_DEMO",
+                        parentId = familyId,
+                        parentName = parentName,
+                        parentInitials = parentInitials,
+                        childId = childId,
+                        childName = childName,
+                        childInitials = childInitials,
+                        childGrade = grade,
+                        pairedCardId = "FC0001",
+                        expiresAtMs = expiresAt,
+                        state = PairState.APPROVED
+                    )
+                    activeRequest = req
+                    markPaired(req)
+                    return Result.success(req)
+                } catch (e: Exception) {
+                    return Result.failure(Exception("That's not a pairing QR"))
+                }
+            }
+        }
+
+        // 4. Pairing QR with focal://pair?code=...
         if (trimmed.startsWith("focal://pair", ignoreCase = true)) {
             val code = trimmed.substringAfter("code=", "").substringBefore("&").trim()
             if (code.isNotBlank()) {
@@ -331,37 +413,36 @@ class DefaultPairingRepository : PairingRepository {
             return Result.failure(Exception("That's not a pairing QR"))
         }
 
-        // 3. Reject non-FOCAL QR payload
-        if (!trimmed.startsWith("FOCAL", ignoreCase = true)) {
-            return Result.failure(Exception("That's not a FOCAL QR"))
+        // 5. Legacy test token support: FOCAL_PARENT_PAIR_TOKEN_...
+        if (trimmed.startsWith("FOCAL_PARENT_PAIR_TOKEN", ignoreCase = true)) {
+            val parent = FocalRepository.instance.controllerUser
+            val parentName = if (parent.name.isNotBlank()) parent.name else "Priya Sharma"
+            val parentInitials = parentName.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").ifEmpty { "PS" }
+
+            val childName = if (trimmed.contains("Ananya", ignoreCase = true)) "Ananya" else "Aarav"
+            val childInitials = if (childName == "Ananya") "AN" else "AR"
+
+            val req = PairRequest(
+                id = "REQ_${now}_QR",
+                code = "QR_PAIR",
+                parentId = parent.id.ifBlank { "parent_01" },
+                parentName = parentName,
+                parentInitials = parentInitials,
+                childId = "child_01",
+                childName = childName,
+                childInitials = childInitials,
+                childGrade = "Class 10 · Student",
+                pairedCardId = "FC0001",
+                expiresAtMs = now + 10 * 60 * 1000L,
+                state = PairState.PENDING
+            )
+
+            activeRequest = req
+            savePendingRequest(req)
+            return Result.success(req)
         }
 
-        val now = currentTimeMillis()
-        val parent = FocalRepository.instance.controllerUser
-        val parentName = if (parent.name.isNotBlank()) parent.name else "Priya Sharma"
-        val parentInitials = parentName.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").ifEmpty { "PS" }
-
-        val childName = if (trimmed.contains("Ananya", ignoreCase = true)) "Ananya" else "Aarav"
-        val childInitials = if (childName == "Ananya") "AN" else "AR"
-
-        val req = PairRequest(
-            id = "REQ_${now}_QR",
-            code = "QR_PAIR",
-            parentId = parent.id.ifBlank { "parent_01" },
-            parentName = parentName,
-            parentInitials = parentInitials,
-            childId = "child_01",
-            childName = childName,
-            childInitials = childInitials,
-            childGrade = "Class 10 · Student",
-            pairedCardId = "FC0001",
-            expiresAtMs = now + 10 * 60 * 1000L,
-            state = PairState.PENDING
-        )
-
-        activeRequest = req
-        savePendingRequest(req)
-        return Result.success(req)
+        return Result.failure(Exception("That's not a pairing QR"))
     }
 
     override fun observeRequest(id: String): Flow<PairState> = flow {

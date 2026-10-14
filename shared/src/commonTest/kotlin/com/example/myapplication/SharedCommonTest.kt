@@ -6,12 +6,34 @@ import com.focal.app.protection.*
 import com.focal.app.data.getDisplayTitle
 import com.focal.app.data.getDisplayDetail
 import kotlin.test.Test
+import kotlin.test.BeforeTest
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SharedCommonTest {
+
+    @BeforeTest
+    fun setUp() {
+        val repo = com.focal.app.data.FocalRepository.instance
+        if (repo.nfcCards.none { it.cardId == "FC0001" }) {
+            repo.nfcCards.add(
+                com.focal.app.model.FocusCard(
+                    id = "FC0001",
+                    cardId = "FC0001",
+                    token = "8XK92LM7",
+                    nfcUid = "04:A3:91:7B:22:6C",
+                    ownerId = "user_priya",
+                    ownerName = "Priya Sharma",
+                    label = "Family card",
+                    status = com.focal.app.model.CardStatus.ACTIVE,
+                    isEnabled = true
+                )
+            )
+        }
+        repo.enableCard("FC0001")
+    }
 
     @Test
     fun testStep4B_TestCardNeverStartsOrEndsFocus() {
@@ -321,6 +343,21 @@ class SharedCommonTest {
     @Test
     fun testStepP0_FamilyCardWorksForMultipleChildren() {
         val repo = com.focal.app.data.FocalRepository.instance
+        if (repo.nfcCards.none { it.cardId == "FC0001" }) {
+            repo.nfcCards.add(
+                com.focal.app.model.FocusCard(
+                    id = "FC0001",
+                    cardId = "FC0001",
+                    token = "8XK92LM7",
+                    nfcUid = "04:A3:91:7B:22:6C",
+                    ownerId = "user_priya",
+                    ownerName = "Priya Sharma",
+                    label = "Family card",
+                    status = com.focal.app.model.CardStatus.ACTIVE,
+                    isEnabled = true
+                )
+            )
+        }
         repo.enableCard("FC0001")
 
         val aarav = repo.childrenList.find { it.name == "Aarav" } ?: repo.childrenList[0]

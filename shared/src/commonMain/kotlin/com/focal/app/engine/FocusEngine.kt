@@ -67,43 +67,36 @@ class FocusEngine private constructor() {
         val hasAccess = com.focal.app.ui.components.PlatformPermissionsHelper.isAccessibilityEnabled()
         val hasOverlay = com.focal.app.ui.components.PlatformPermissionsHelper.isOverlayEnabled()
         val hasAdmin = com.focal.app.ui.components.PlatformPermissionsHelper.isDeviceAdminActive()
-        val hasUsage = com.focal.app.ui.components.PlatformPermissionsHelper.isUsageAccessEnabled()
-        val hasNotif = com.focal.app.ui.components.PlatformPermissionsHelper.isNotificationPermissionGranted()
-        val hasBat = com.focal.app.ui.components.PlatformPermissionsHelper.isBatteryOptimizationDisabled()
-        val hasAlarm = com.focal.app.ui.components.PlatformPermissionsHelper.isExactAlarmPermissionGranted()
 
         val missingList = mutableListOf<String>()
         if (!hasAccess) missingList.add("Accessibility")
         if (!hasOverlay) missingList.add("Display over other apps")
-        if (!hasAdmin) missingList.add("Uninstall protection")
-        if (!hasUsage) missingList.add("Usage access")
-        if (!hasNotif) missingList.add("Notifications")
+        if (!hasAdmin) missingList.add("Device admin")
 
-        val warningList = mutableListOf<String>()
-        if (!hasBat) warningList.add("Battery: Unrestricted")
-        if (!hasAlarm) warningList.add("Alarms & reminders")
-
+        val isNowActive = missingList.isEmpty()
         val previousState = isProtectionActive
         isAccessibilityGranted = hasAccess
         isOverlayGranted = hasOverlay
-        isProtectionActive = missingList.isEmpty()
+        isProtectionActive = isNowActive
         missingPermissionsList = missingList
         lastHeartbeatTimeMillis = currentTimeMillis()
 
-        if (!isProtectionActive) {
+        val targetChildId = if (repository.currentUser.role == com.focal.app.model.UserRole.CHILD) repository.currentUser.id else "child_1"
+        val childName = currentSession?.childName ?: repository.currentUser.name
+
+        if (!isNowActive) {
             protectionStatusText = "Protection Disabled"
             if (previousState) {
-                val childName = currentSession?.childName ?: repository.currentUser.name
-                val missingStr = missingList.joinToString(", ")
+                val permName = missingList.firstOrNull() ?: "Accessibility"
 
                 com.focal.app.data.ActivityRepository.instance.recordEvent(
                     type = com.focal.app.data.ActivityEventType.PROTECTION_OFF,
-                    childId = repository.currentUser.id,
-                    details = "Protection disabled: missing $missingStr",
-                    metadata = mapOf("missing" to missingStr)
+                    childId = targetChildId,
+                    details = "$permName was turned off",
+                    metadata = mapOf("permission" to permName)
                 )
 
-                val notifMessage = "Focus Protection Disabled — ${childName}'s device has disabled $missingStr. FOCAL restrictions may not be fully enforced."
+                val notifMessage = "Focus Protection Disabled — ${childName}'s device has disabled $permName. FOCAL restrictions may not be fully enforced."
 
                 repository.notifications.add(0, NotificationItem(
                     id = "notif_perm_${currentTimeMillis()}",
@@ -115,7 +108,7 @@ class FocusEngine private constructor() {
                 ))
 
                 com.focal.app.data.FocalSyncEngine.instance.reportProtectionStatus(
-                    childId = repository.currentUser.id,
+                    childId = targetChildId,
                     protectionStatus = "Protection Disabled",
                     isAccessibilityGranted = hasAccess,
                     isOverlayGranted = hasOverlay
@@ -126,16 +119,39 @@ class FocusEngine private constructor() {
             if (!previousState) {
                 com.focal.app.data.ActivityRepository.instance.recordEvent(
                     type = com.focal.app.data.ActivityEventType.PROTECTION_ON,
-                    childId = repository.currentUser.id,
-                    details = "All protection permissions active",
+                    childId = targetChildId,
+                    details = "All permissions on",
                     metadata = emptyMap()
                 )
 
                 com.focal.app.data.FocalSyncEngine.instance.reportProtectionStatus(
-                    childId = repository.currentUser.id,
+                    childId = targetChildId,
                     protectionStatus = "Protection Active",
                     isAccessibilityGranted = true,
-                    isOverlayGranted = hasOverlay
+                    isOverlayGranted = true
+                )
+            }
+
+            // Immediately resume blocking if focus is currently active!
+            if (sessionState == SessionState.ACTIVE) {
+                val current = currentSession
+                val endsAt = current?.startTimeMillis?.plus((current.targetDurationMinutes * 60 * 1000L))
+                    ?: (currentTimeMillis() + remainingSeconds * 1000L)
+                val policy = repository.policies.find { it.id == current?.policyId }
+                val blockedApps = policy?.blockedApps ?: listOf(
+                    "Instagram", "YouTube", "TikTok", "Amazon", "BGMI", "Chrome", "Snapchat", "Netflix", "Roblox", "Clash of Clans"
+                )
+                val blockedWebsites = policy?.blockedWebsites ?: emptyList()
+                val resolvedPkgs = blockedApps.map { com.focal.app.protection.ProtectionEngine.APP_NAME_TO_PACKAGE[it] ?: it }.toSet()
+
+                com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
+                    active = true,
+                    endsAtElapsed = endsAt,
+                    policy = com.focal.app.model.FocusPolicyData(
+                        blockedApps = blockedApps,
+                        blockedPackages = resolvedPkgs,
+                        blockedWebsites = blockedWebsites
+                    )
                 )
             }
         }
@@ -176,14 +192,25 @@ class FocusEngine private constructor() {
     private fun startTimer() {
         timerJob?.cancel()
         timerJob = scope.launch {
-            while (isActive && remainingSeconds > 0 && sessionState == SessionState.ACTIVE) {
+            while (isActive && sessionState == SessionState.ACTIVE) {
                 delay(1000)
-                remainingSeconds--
-                currentSession = currentSession?.copy(
-                    remainingSeconds = remainingSeconds
-                )
-                if (remainingSeconds <= 0) {
-                    onTimerExpired()
+                val session = currentSession
+                if (session != null) {
+                    val remaining = maxOf(0L, (session.endTimeMillis - currentTimeMillis()) / 1000L)
+                    remainingSeconds = remaining.toInt()
+                    currentSession = session.copy(
+                        remainingSeconds = remainingSeconds
+                    )
+                    if (remaining <= 0L) {
+                        onTimerExpired()
+                        break
+                    }
+                } else {
+                    remainingSeconds--
+                    if (remainingSeconds <= 0) {
+                        onTimerExpired()
+                        break
+                    }
                 }
             }
         }
@@ -215,15 +242,17 @@ class FocusEngine private constructor() {
         distractionsPrevented = 0
         emergencyExitsCount = 0
 
+        val now = currentTimeMillis()
+        val endsAt = now + totalSeconds * 1000L
         val newSession = FocusSession(
-            id = "sess_${currentTimeMillis()}",
+            id = "sess_${now}",
             userId = user.id,
             childName = user.name,
             policyId = policy.id,
             policyName = policy.name,
             mode = policy.mode,
             triggerType = triggerType,
-            startTimeMillis = currentTimeMillis(),
+            startTimeMillis = now,
             targetDurationMinutes = policy.durationMinutes,
             remainingSeconds = totalSeconds,
             status = SessionState.ACTIVE,
@@ -238,10 +267,24 @@ class FocusEngine private constructor() {
         currentSession = newSession
         sessionState = SessionState.ACTIVE
 
+        // Persist session timing locally
+        com.focal.app.data.FocalLocalStorage.saveLong("KEY_FOCUS_ENDS_AT_MILLIS", endsAt)
+
+        // Update child profile in parent repository
+        val childIdx = repository.childrenList.indexOfFirst { it.userId == user.id || it.id == "child_1" || it.name.equals(user.name, ignoreCase = true) }
+        if (childIdx >= 0) {
+            repository.childrenList[childIdx] = repository.childrenList[childIdx].copy(
+                isFocusing = true,
+                focusEndsAtMillis = endsAt,
+                focusTotalMinutes = policy.durationMinutes,
+                remainingMinutes = policy.durationMinutes
+            )
+        }
+
         val resolvedPkgs = policy.blockedApps.map { com.focal.app.protection.ProtectionEngine.APP_NAME_TO_PACKAGE[it] ?: it }.toSet()
         com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
             active = true,
-            endsAtElapsed = currentTimeMillis() + totalSeconds * 1000L,
+            endsAtElapsed = endsAt,
             policy = com.focal.app.model.FocusPolicyData(
                 blockedApps = policy.blockedApps,
                 blockedPackages = resolvedPkgs,
@@ -460,6 +503,17 @@ class FocusEngine private constructor() {
         remainingSeconds = 0
         sessionState = SessionState.COMPLETED
 
+        com.focal.app.data.FocalLocalStorage.remove("KEY_FOCUS_ENDS_AT_MILLIS")
+
+        val childIdx = repository.childrenList.indexOfFirst { it.userId == session.userId || it.id == "child_1" || it.name.equals(session.childName, ignoreCase = true) }
+        if (childIdx >= 0) {
+            repository.childrenList[childIdx] = repository.childrenList[childIdx].copy(
+                isFocusing = false,
+                focusEndsAtMillis = 0L,
+                remainingMinutes = 0
+            )
+        }
+
         com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
             active = false,
             endsAtElapsed = 0L,
@@ -497,7 +551,19 @@ class FocusEngine private constructor() {
             focusScore = 95
         )
         currentSession = null
+        remainingSeconds = 0
         sessionState = SessionState.COMPLETED
+
+        com.focal.app.data.FocalLocalStorage.remove("KEY_FOCUS_ENDS_AT_MILLIS")
+
+        val childIdx = repository.childrenList.indexOfFirst { it.userId == session.userId || it.id == "child_1" || it.name.equals(session.childName, ignoreCase = true) }
+        if (childIdx >= 0) {
+            repository.childrenList[childIdx] = repository.childrenList[childIdx].copy(
+                isFocusing = false,
+                focusEndsAtMillis = 0L,
+                remainingMinutes = 0
+            )
+        }
 
         // Log Activity Event
         com.focal.app.data.ActivityRepository.instance.recordEvent(
@@ -570,8 +636,7 @@ class FocusEngine private constructor() {
     val progressFraction: Float
         get() {
             val target = (currentSession?.targetDurationMinutes ?: 160) * 60
-            if (target <= 0) return 0.68f
-            val elapsed = (target - remainingSeconds).coerceAtLeast(0)
-            return (elapsed.toFloat() / target.toFloat()).coerceIn(0f, 1f)
+            if (target <= 0) return 0f
+            return (remainingSeconds.toFloat() / target.toFloat()).coerceIn(0f, 1f)
         }
 }

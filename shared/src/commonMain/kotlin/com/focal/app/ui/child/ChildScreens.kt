@@ -55,6 +55,8 @@ import org.jetbrains.compose.resources.painterResource
 import focal.shared.generated.resources.Res
 import focal.shared.generated.resources.focal_logo
 import com.focal.app.data.FocalLocalStorage
+import com.focal.app.data.ActivityRepository
+import com.focal.app.data.ActivityEventType
 import com.focal.app.theme.FocalColors
 import com.focal.app.ui.components.*
 import com.focal.app.ui.child.components.*
@@ -117,9 +119,17 @@ fun ChildDashboardScreen(
     val currentStreak by StreakRepository.instance.currentStreak.collectAsState(initial = StreakRepository.instance.getStreak())
 
     val protectionState by com.focal.app.protection.ProtectionStateRepository.instance.state.collectAsState()
-    val nowElapsed = com.focal.app.model.currentTimeMillis()
+    var nowElapsed by remember { mutableStateOf(com.focal.app.model.currentTimeMillis()) }
+    LaunchedEffect(protectionState.parentUnlockUntilElapsed) {
+        while (com.focal.app.model.currentTimeMillis() < protectionState.parentUnlockUntilElapsed) {
+            nowElapsed = com.focal.app.model.currentTimeMillis()
+            kotlinx.coroutines.delay(1000L)
+        }
+        nowElapsed = com.focal.app.model.currentTimeMillis()
+    }
     val isParentUnlockActive = nowElapsed < protectionState.parentUnlockUntilElapsed
     val unlockMinsLeft = ((protectionState.parentUnlockUntilElapsed - nowElapsed) / 60000L).coerceAtLeast(1)
+    var showLockNowSnackbar by remember { mutableStateOf(false) }
 
     var showEndFocusSheet by remember { mutableStateOf(false) }
     var showSessionComplete by remember { mutableStateOf(false) }
@@ -192,9 +202,7 @@ fun ChildDashboardScreen(
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 2
                     )
                 }
                 StreakPill(streakCount = currentStreak)
@@ -213,39 +221,91 @@ fun ChildDashboardScreen(
 
             Spacer(Modifier.height(18.dp))
 
-            // Parent Unlock Active Banner (Preserved)
+            // Parent Unlock Active Banner (PH3)
             if (isParentUnlockActive) {
-                Row(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(ChildColors.BannerBg)
-                        .border(1.dp, Color.White, RoundedCornerShape(16.dp))
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Parent unlock · $unlockMinsLeft min left",
-                            style = typography.headline.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
+                        .drawBehind {
+                            // Soft white glow around banner
+                            drawRoundRect(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(Color.White.copy(alpha = 0.08f), Color.Transparent),
+                                    center = center,
+                                    radius = size.width / 1.5f
+                                ),
+                                cornerRadius = CornerRadius(20.dp.toPx(), 20.dp.toPx())
+                            )
+                        }
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            brush = Brush.verticalGradient(
+                                listOf(Color(0xFF141414), Color(0xFF0A0A0A))
                             )
                         )
-                        Text(
-                            text = "Protection rules temporarily paused",
-                            style = typography.caption.copy(color = ChildColors.Secondary)
+                        .border(1.dp, Color.White, RoundedCornerShape(20.dp))
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 44dp dark circle with open-lock icon
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF171717))
+                                .border(1.dp, Color(0xFF2E2E2E), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = FocalIcons.LockOpen,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Spacer(Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Unlocked · $unlockMinsLeft min left",
+                                style = typography.body.copy(
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                ),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "Protection is paused",
+                                style = typography.caption.copy(
+                                    fontSize = 13.sp,
+                                    color = ChildColors.Secondary
+                                ),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+
+                        Spacer(Modifier.width(10.dp))
+
+                        ChildPrimaryButton(
+                            text = "Lock now",
+                            onClick = {
+                                com.focal.app.protection.ProtectionStateRepository.instance.clearParentUnlock()
+                                PlatformPermissionsHelper.showToast("Protection is back on")
+                                showLockNowSnackbar = true
+                            },
+                            modifier = Modifier.wrapContentWidth().height(42.dp)
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
-                    ChildPrimaryButton(
-                        text = "Lock now",
-                        onClick = { com.focal.app.protection.ProtectionStateRepository.instance.clearParentUnlock() },
-                        modifier = Modifier.width(104.dp)
-                    )
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
             }
 
             // Protection Disabled Red Banner: ONLY when protection is off
@@ -369,17 +429,13 @@ fun ChildDashboardScreen(
                                             fontWeight = FontWeight.Bold,
                                             color = Color.White
                                         ),
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis
+                                        maxLines = 2
                                     )
                                     Spacer(Modifier.height(2.dp))
                                     Text(
                                         text = "${currentSession?.blockedAppsCount ?: 8} apps · ${currentSession?.blockedWebsitesCount ?: 3} websites blocked",
                                         style = typography.caption.copy(color = ChildColors.Secondary),
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis
+                                        maxLines = 2
                                     )
                                 }
 
@@ -417,65 +473,77 @@ fun ChildDashboardScreen(
                     // SCREEN 1 — HOME (READY)
                     // =========================================================
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // Hero GlassCard (Ready to Focus)
+                        // Hero GlassCard (Ready to Focus, PH1)
                         GlassCard(
                             modifier = Modifier.fillMaxWidth(),
-                            padding = 20.dp
+                            padding = 18.dp
                         ) {
-                            Box(modifier = Modifier.fillMaxWidth()) {
-                                // Right Side: Tilted FocalCardHero (Logo only, soft glow, -14° tilt)
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.CenterEnd)
-                                        .offset(x = 10.dp, y = 20.dp)
-                                        .width(190.dp)
-                                        .height(180.dp)
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                // Top section: Left text column (max 55% width) + Top-right fixed 150x120dp box
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.Top
                                 ) {
-                                    FocalCardHero(
-                                        modifier = Modifier.fillMaxSize(),
-                                        cardWidth = 170.dp,
-                                        cardHeight = 106.dp,
-                                        logoSize = 58.dp,
-                                        tiltAngle = -14f,
-                                        ringCount = 2
-                                    )
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(0.55f)
+                                    ) {
+                                        Text(
+                                            text = "TAP YOUR CARD",
+                                            style = typography.overline.copy(
+                                                color = ChildColors.Tertiary,
+                                                letterSpacing = 1.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 11.sp
+                                            )
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            text = "Ready to\nfocus?",
+                                            style = typography.display.copy(
+                                                fontSize = 30.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                                lineHeight = 34.sp
+                                            ),
+                                            maxLines = 2
+                                        )
+                                        Spacer(Modifier.height(10.dp))
+                                        Text(
+                                            text = "Tap your card or scan your parent's QR.",
+                                            style = typography.body.copy(
+                                                color = ChildColors.Secondary,
+                                                fontSize = 14.sp,
+                                                lineHeight = 19.sp
+                                            ),
+                                            maxLines = 2
+                                        )
+                                    }
+
+                                    // top-right: FocalCardHero 124dp wide, tilted -14°, soft glow, two thin ellipse rings under it, inside a fixed 150x120dp box aligned to the card's top-right
+                                    Box(
+                                        modifier = Modifier.size(width = 150.dp, height = 120.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        FocalCardHero(
+                                            modifier = Modifier.fillMaxSize(),
+                                            cardWidth = 124.dp,
+                                            cardHeight = 77.dp,
+                                            logoSize = 42.dp,
+                                            tiltAngle = -14f,
+                                            ringCount = 2
+                                        )
+                                    }
                                 }
 
-                                // Left Side: Text and Buttons
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(end = 120.dp)
-                                ) {
-                                    Text(
-                                        text = "TAP YOUR CARD",
-                                        style = typography.overline.copy(
-                                            color = ChildColors.Tertiary,
-                                            letterSpacing = 1.5.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(
-                                        text = "Ready to\nfocus?",
-                                        style = typography.display.copy(
-                                            fontSize = 32.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            lineHeight = 36.sp
-                                        )
-                                    )
-                                    Spacer(Modifier.height(10.dp))
-                                    Text(
-                                        text = "Tap your FOCAL card or scan your parent's QR to start.",
-                                        style = typography.body.copy(
-                                            color = ChildColors.Secondary,
-                                            fontSize = 13.5.sp,
-                                            lineHeight = 18.sp
-                                        )
-                                    )
-                                    Spacer(Modifier.height(20.dp))
+                                Spacer(Modifier.height(20.dp))
 
+                                // bottom: Row with two equal buttons (weight 1f each, 52dp tall, 10dp gap): PrimaryButton (NFC icon) "Tap card" | SecondaryButton (QR icon) "Scan QR". No arrows, no "…".
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     ChildPrimaryButton(
                                         text = "Tap card",
                                         onClick = onNfcTapClick,
@@ -487,18 +555,11 @@ fun ChildDashboardScreen(
                                                 modifier = Modifier.size(18.dp)
                                             )
                                         },
-                                        trailingIcon = {
-                                            Icon(
-                                                imageVector = FocalIcons.ArrowForward,
-                                                contentDescription = null,
-                                                tint = Color.Black,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        },
-                                        modifier = Modifier.width(156.dp)
+                                        trailingIcon = null,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(52.dp)
                                     )
-
-                                    Spacer(Modifier.height(10.dp))
 
                                     ChildSecondaryButton(
                                         text = "Scan QR",
@@ -511,15 +572,10 @@ fun ChildDashboardScreen(
                                                 modifier = Modifier.size(18.dp)
                                             )
                                         },
-                                        trailingIcon = {
-                                            Icon(
-                                                imageVector = FocalIcons.ArrowForward,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        },
-                                        modifier = Modifier.width(156.dp)
+                                        trailingIcon = null,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(52.dp)
                                     )
                                 }
                             }
@@ -667,6 +723,36 @@ fun ChildDashboardScreen(
                     isRequestPending = isEmergencyPending,
                     parentName = "Mom"
                 )
+            }
+        }
+
+        if (showLockNowSnackbar) {
+            LaunchedEffect(showLockNowSnackbar) {
+                kotlinx.coroutines.delay(2500)
+                showLockNowSnackbar = false
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 120.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color(0xFF1E1E1E))
+                        .border(1.dp, Color(0xFF3A3A3A), CircleShape)
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = "Protection is back on",
+                        style = typography.caption.copy(
+                            fontSize = 13.sp,
+                            color = Color.White,
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                }
             }
         }
     }
@@ -1404,8 +1490,7 @@ fun SchedulesScreen(
                                             fontWeight = FontWeight.SemiBold,
                                             color = Color.White
                                         ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        maxLines = 2
                                     )
 
                                     Spacer(Modifier.height(4.dp))
@@ -1477,11 +1562,23 @@ private val MOTIVATIONAL_QUOTES = listOf(
 
 @Composable
 fun InsightsScreen(
+    childId: String? = null,
+    onBack: (() -> Unit)? = null,
     repository: FocalRepository = FocalRepository.instance,
     focusEngine: FocusEngine = FocusEngine.instance
 ) {
     val typography = LocalChildTypography.current
-    val user = repository.currentUser
+    val isParentView = childId != null
+    val targetChild = if (isParentView) {
+        repository.childrenList.find { it.id == childId } ?: repository.childrenList.first()
+    } else {
+        repository.childrenList.find { it.userId == repository.currentUser.id || it.id == "child_1" }
+            ?: repository.childrenList.first()
+    }
+    val childName = targetChild.name
+    val childGrade = targetChild.grade.ifBlank { "Student" }
+    val isThisPhone = (targetChild.id == "child_1" || (!isParentView && repository.currentUser.role == com.focal.app.model.UserRole.CHILD))
+
     val scrollState = rememberSaveable(saver = androidx.compose.foundation.ScrollState.Saver) {
         androidx.compose.foundation.ScrollState(0)
     }
@@ -1489,35 +1586,92 @@ fun InsightsScreen(
     var selectedRange by remember { mutableStateOf(InsightsRange.WEEK) }
 
     // Live data binding from ScreenTimeRepository and FocusEngine
-    val todayFocusMinutes = focusEngine.todayFocusMinutes
-    val blockedCount = repository.policies.sumOf { it.blockedApps.size } + 11 // Real blocked metrics or policy triggers
+    val childTodayFocusMinutes = if (isThisPhone && focusEngine.todayFocusMinutes > 0) {
+        focusEngine.todayFocusMinutes
+    } else {
+        targetChild.todayFocusMinutes
+    }
 
-    val insightsData = remember(selectedRange, todayFocusMinutes) {
-        ScreenTimeRepository.getInsightsData(
-            range = selectedRange,
-            childTodayFocusMinutes = if (todayFocusMinutes > 0) todayFocusMinutes else 155,
-            totalBlockedAttempts = blockedCount
-        )
+    val childEvents = remember(targetChild.id) {
+        ActivityRepository.instance.getEventsForChild(targetChild.id)
+    }
+    val blockedCount = remember(childEvents, isThisPhone) {
+        val blockedFromEvents = childEvents.count {
+            it.type == ActivityEventType.APP_BLOCKED || it.type == ActivityEventType.SITE_BLOCKED
+        }
+        if (blockedFromEvents > 0) blockedFromEvents else if (isThisPhone) 14 else 0
+    }
+
+    val insightsData = remember(selectedRange, childTodayFocusMinutes, isThisPhone, blockedCount) {
+        if (isThisPhone) {
+            ScreenTimeRepository.getInsightsData(
+                range = selectedRange,
+                childTodayFocusMinutes = childTodayFocusMinutes,
+                totalBlockedAttempts = blockedCount
+            )
+        } else {
+            val rangeFocusMinutes = when (selectedRange) {
+                InsightsRange.WEEK -> (childTodayFocusMinutes * 5).coerceAtLeast(120)
+                InsightsRange.MONTH -> (childTodayFocusMinutes * 20).coerceAtLeast(600)
+                InsightsRange.LIFETIME -> (childTodayFocusMinutes * 120).coerceAtLeast(3600)
+            }
+            val dailyAvg = (rangeFocusMinutes / (if (selectedRange == InsightsRange.WEEK) 7 else if (selectedRange == InsightsRange.MONTH) 30 else 180)).coerceAtLeast(30)
+
+            val pairedBars = mutableListOf<PairedBarData>()
+            when (selectedRange) {
+                InsightsRange.WEEK -> {
+                    val dayLabels = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+                    dayLabels.forEachIndexed { idx, label ->
+                        val focusMin = when (idx) {
+                            6 -> childTodayFocusMinutes
+                            5 -> (childTodayFocusMinutes * 0.9f).toInt()
+                            4 -> (childTodayFocusMinutes * 1.2f).toInt()
+                            3 -> (childTodayFocusMinutes * 0.8f).toInt()
+                            2 -> (childTodayFocusMinutes * 1.1f).toInt()
+                            1 -> (childTodayFocusMinutes * 0.7f).toInt()
+                            else -> (childTodayFocusMinutes * 1.0f).toInt()
+                        }
+                        pairedBars.add(PairedBarData(label, focusMin, 0))
+                    }
+                }
+                InsightsRange.MONTH -> {
+                    listOf("W1", "W2", "W3", "W4", "W5").forEachIndexed { idx, label ->
+                        pairedBars.add(PairedBarData(label, (dailyAvg * (5 + idx % 3)), 0))
+                    }
+                }
+                InsightsRange.LIFETIME -> {
+                    listOf("May", "Jun", "Jul", "Aug", "Sep", "Oct").forEachIndexed { idx, label ->
+                        pairedBars.add(PairedBarData(label, (dailyAvg * (20 + idx * 2)), 0))
+                    }
+                }
+            }
+
+            InsightsData(
+                range = selectedRange,
+                totalFocusMinutes = rangeFocusMinutes,
+                dailyAverageFocusMinutes = dailyAvg,
+                dailyAverageScreenTimeMinutes = null,
+                blockedAttemptsCount = blockedCount,
+                pairedBars = pairedBars,
+                topApps = emptyList(),
+                hasUsageAccess = false
+            )
+        }
     }
 
     val currentDeviceTime = remember { getDeviceCurrentTime() }
     val quoteIndex = (currentDeviceTime.dayOfYear) % MOTIVATIONAL_QUOTES.size
     val dailyQuote = MOTIVATIONAL_QUOTES[quoteIndex]
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-    ) {
-        GlowArcs()
-
+    @Composable
+    fun InsightsBody(bottomPadding: androidx.compose.ui.unit.Dp) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
                 .verticalScroll(scrollState)
-                .padding(horizontal = 20.dp, vertical = 16.dp)
-                .padding(bottom = 110.dp)
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .navigationBarsPadding()
+                .padding(bottom = bottomPadding)
         ) {
             // Header Profile GlassCard
             GlassCard(
@@ -1528,30 +1682,28 @@ fun InsightsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ChildAvatar(name = user.name, size = 56.dp)
+                    ChildAvatar(name = childName, size = 56.dp)
 
                     Spacer(Modifier.width(14.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = user.name,
+                            text = childName,
                             style = typography.headline.copy(
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White
                             ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            text = "Class 10 · Student",
+                            text = if (childGrade.contains("Student")) childGrade else "$childGrade · Student",
                             style = typography.caption.copy(
                                 fontSize = 13.sp,
                                 color = ChildColors.Secondary
                             ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                     }
 
@@ -1583,12 +1735,12 @@ fun InsightsScreen(
                                 InsightsRange.MONTH -> "Focused this month"
                                 InsightsRange.LIFETIME -> "Focused all time"
                             },
-                            style = typography.overline.copy(
+                            style = typography.caption.copy(
                                 fontSize = 11.sp,
-                                color = ChildColors.Secondary
+                                color = ChildColors.Secondary,
+                                letterSpacing = 0.sp
                             ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                     }
                 }
@@ -1640,227 +1792,261 @@ fun InsightsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 padding = 18.dp
             ) {
-                // Header row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(ChildColors.IconCircleBg)
-                                    .border(1.dp, ChildColors.Border, RoundedCornerShape(10.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = FocalIcons.Target,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Focus time",
-                                    style = typography.headline.copy(
-                                        fontSize = 17.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color.White
-                                    )
-                                )
-                                Text(
-                                    text = if (insightsData.hasUsageAccess) "vs screen time" else "logged focus",
-                                    style = typography.caption.copy(
-                                        fontSize = 13.sp,
-                                        color = ChildColors.Secondary
-                                    )
-                                )
-                            }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(ChildColors.IconCircleBg)
+                                .border(1.dp, ChildColors.Border, RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = FocalIcons.Target,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
-
-                        Column(horizontalAlignment = Alignment.End) {
-                            val avgHrs = insightsData.dailyAverageFocusMinutes / 60
-                            val avgMins = insightsData.dailyAverageFocusMinutes % 60
+                        Spacer(Modifier.width(12.dp))
+                        Column {
                             Text(
-                                text = "${avgHrs}h ${avgMins}m",
-                                style = typography.title.copy(
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold,
+                                text = "Focus time",
+                                style = typography.headline.copy(
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = Color.White
                                 )
                             )
                             Text(
-                                text = "Daily average",
+                                text = if (isThisPhone && insightsData.hasUsageAccess) "vs screen time" else "logged focus",
                                 style = typography.caption.copy(
-                                    fontSize = 12.sp,
+                                    fontSize = 13.sp,
                                     color = ChildColors.Secondary
                                 )
                             )
                         }
                     }
 
-                    Spacer(Modifier.height(20.dp))
-
-                    // Paired Bar Chart (Canvas)
-                    var chartAnimated by remember { mutableStateOf(false) }
-                    LaunchedEffect(selectedRange) {
-                        chartAnimated = false
-                        kotlinx.coroutines.delay(20)
-                        chartAnimated = true
-                    }
-
-                    val animProgress by animateFloatAsState(
-                        targetValue = if (chartAnimated) 1f else 0f,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    )
-
-                    val maxMinutes = remember(insightsData) {
-                        val maxFocus = insightsData.pairedBars.maxOfOrNull { it.focusMinutes } ?: 120
-                        val maxScreen = if (insightsData.hasUsageAccess) {
-                            insightsData.pairedBars.maxOfOrNull { it.screenTimeMinutes } ?: 0
-                        } else 0
-                        maxOf(maxFocus, maxScreen, 120)
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(130.dp)
-                    ) {
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            val count = insightsData.pairedBars.size
-                            if (count == 0) return@Canvas
-
-                            val slotWidth = size.width / count
-                            val barWidth = 12.dp.toPx()
-                            val barGap = 3.dp.toPx()
-                            val availableH = size.height - 8.dp.toPx()
-
-                            insightsData.pairedBars.forEachIndexed { i, barData ->
-                                val slotCenter = slotWidth * i + (slotWidth / 2f)
-
-                                if (insightsData.hasUsageAccess) {
-                                    // Paired bars: focus bar on left, screen time bar on right
-                                    val pairTotalWidth = barWidth * 2 + barGap
-                                    val focusLeft = slotCenter - (pairTotalWidth / 2f)
-                                    val screenLeft = focusLeft + barWidth + barGap
-
-                                    val focusFrac = (barData.focusMinutes.toFloat() / maxMinutes).coerceIn(0.04f, 1f)
-                                    val focusBarH = availableH * focusFrac * animProgress
-
-                                    val screenFrac = (barData.screenTimeMinutes.toFloat() / maxMinutes).coerceIn(0.04f, 1f)
-                                    val screenBarH = availableH * screenFrac * animProgress
-
-                                    // White-gradient focus bar (#FFFFFF -> #9A9A9A)
-                                    drawRoundRect(
-                                        brush = Brush.verticalGradient(
-                                            colors = listOf(Color.White, ChildColors.Secondary),
-                                            startY = availableH - focusBarH,
-                                            endY = availableH
-                                        ),
-                                        topLeft = Offset(focusLeft, availableH - focusBarH),
-                                        size = Size(barWidth, focusBarH),
-                                        cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                                    )
-
-                                    // #3A3A3A screen-time bar
-                                    drawRoundRect(
-                                        color = ChildColors.BorderStrong,
-                                        topLeft = Offset(screenLeft, availableH - screenBarH),
-                                        size = Size(barWidth, screenBarH),
-                                        cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                                    )
-                                } else {
-                                    // Focus-only bar centered
-                                    val focusLeft = slotCenter - (barWidth / 2f)
-                                    val focusFrac = (barData.focusMinutes.toFloat() / maxMinutes).coerceIn(0.04f, 1f)
-                                    val focusBarH = availableH * focusFrac * animProgress
-
-                                    drawRoundRect(
-                                        brush = Brush.verticalGradient(
-                                            colors = listOf(Color.White, ChildColors.Secondary),
-                                            startY = availableH - focusBarH,
-                                            endY = availableH
-                                        ),
-                                        topLeft = Offset(focusLeft, availableH - focusBarH),
-                                        size = Size(barWidth, focusBarH),
-                                        cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-
-                    // Labels under chart
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceAround
-                    ) {
-                        insightsData.pairedBars.forEach { bar ->
-                            Text(
-                                text = bar.label,
-                                style = typography.caption.copy(
-                                    fontSize = 11.sp,
-                                    color = ChildColors.Secondary
-                                ),
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(14.dp))
-
-                    // Legend
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                        )
-                        Spacer(Modifier.width(6.dp))
+                    Column(horizontalAlignment = Alignment.End) {
+                        val avgHrs = insightsData.dailyAverageFocusMinutes / 60
+                        val avgMins = insightsData.dailyAverageFocusMinutes % 60
                         Text(
-                            text = "Focus",
-                            style = typography.caption.copy(
-                                fontSize = 11.sp,
+                            text = "${avgHrs}h ${avgMins}m",
+                            style = typography.title.copy(
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                         )
+                        Text(
+                            text = "Daily average",
+                            style = typography.caption.copy(
+                                fontSize = 12.sp,
+                                color = ChildColors.Secondary
+                            )
+                        )
+                    }
+                }
 
-                        if (insightsData.hasUsageAccess) {
-                            Spacer(Modifier.width(18.dp))
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(ChildColors.BorderStrong)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = "Screen time",
-                                style = typography.caption.copy(
-                                    fontSize = 11.sp,
-                                    color = ChildColors.Secondary
+                Spacer(Modifier.height(20.dp))
+
+                // Paired Bar Chart (Canvas)
+                var chartAnimated by remember { mutableStateOf(false) }
+                LaunchedEffect(selectedRange) {
+                    chartAnimated = false
+                    kotlinx.coroutines.delay(20)
+                    chartAnimated = true
+                }
+
+                val animProgress by animateFloatAsState(
+                    targetValue = if (chartAnimated) 1f else 0f,
+                    animationSpec = tween(400, easing = FastOutSlowInEasing)
+                )
+
+                val showScreenTimeBars = isThisPhone && insightsData.hasUsageAccess
+                val maxMinutes = remember(insightsData, showScreenTimeBars) {
+                    val maxFocus = insightsData.pairedBars.maxOfOrNull { it.focusMinutes } ?: 120
+                    val maxScreen = if (showScreenTimeBars) {
+                        insightsData.pairedBars.maxOfOrNull { it.screenTimeMinutes } ?: 0
+                    } else 0
+                    maxOf(maxFocus, maxScreen, 120)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp)
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val count = insightsData.pairedBars.size
+                        if (count == 0) return@Canvas
+
+                        val slotWidth = size.width / count
+                        val barWidth = 12.dp.toPx()
+                        val barGap = 3.dp.toPx()
+                        val availableH = size.height - 8.dp.toPx()
+
+                        insightsData.pairedBars.forEachIndexed { i, barData ->
+                            val slotCenter = slotWidth * i + (slotWidth / 2f)
+
+                            if (showScreenTimeBars) {
+                                val pairTotalWidth = barWidth * 2 + barGap
+                                val focusLeft = slotCenter - (pairTotalWidth / 2f)
+                                val screenLeft = focusLeft + barWidth + barGap
+
+                                val focusFrac = (barData.focusMinutes.toFloat() / maxMinutes).coerceIn(0.04f, 1f)
+                                val focusBarH = availableH * focusFrac * animProgress
+
+                                val screenFrac = (barData.screenTimeMinutes.toFloat() / maxMinutes).coerceIn(0.04f, 1f)
+                                val screenBarH = availableH * screenFrac * animProgress
+
+                                drawRoundRect(
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(Color.White, ChildColors.Secondary),
+                                        startY = availableH - focusBarH,
+                                        endY = availableH
+                                    ),
+                                    topLeft = Offset(focusLeft, availableH - focusBarH),
+                                    size = Size(barWidth, focusBarH),
+                                    cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
                                 )
-                            )
+
+                                drawRoundRect(
+                                    color = ChildColors.BorderStrong,
+                                    topLeft = Offset(screenLeft, availableH - screenBarH),
+                                    size = Size(barWidth, screenBarH),
+                                    cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                                )
+                            } else {
+                                val focusLeft = slotCenter - (barWidth / 2f)
+                                val focusFrac = (barData.focusMinutes.toFloat() / maxMinutes).coerceIn(0.04f, 1f)
+                                val focusBarH = availableH * focusFrac * animProgress
+
+                                drawRoundRect(
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(Color.White, ChildColors.Secondary),
+                                        startY = availableH - focusBarH,
+                                        endY = availableH
+                                    ),
+                                    topLeft = Offset(focusLeft, availableH - focusBarH),
+                                    size = Size(barWidth, focusBarH),
+                                    cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                                )
+                            }
                         }
                     }
                 }
 
+                Spacer(Modifier.height(8.dp))
+
+                // Labels under chart
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    insightsData.pairedBars.forEach { bar ->
+                        Text(
+                            text = bar.label,
+                            style = typography.caption.copy(
+                                fontSize = 11.sp,
+                                color = ChildColors.Secondary
+                            ),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                // Legend
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Focus",
+                        style = typography.caption.copy(
+                            fontSize = 11.sp,
+                            color = Color.White
+                        )
+                    )
+
+                    if (showScreenTimeBars) {
+                        Spacer(Modifier.width(18.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(ChildColors.BorderStrong)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Screen time",
+                            style = typography.caption.copy(
+                                fontSize = 11.sp,
+                                color = ChildColors.Secondary
+                            )
+                        )
+                    }
+                }
+            }
+
             Spacer(Modifier.height(12.dp))
 
-            // "Most used apps" GlassCard
-            if (insightsData.hasUsageAccess && insightsData.topApps.isNotEmpty()) {
+            // Screen time / Most used apps:
+            if (!isThisPhone) {
+                // GlassCard for remote child: "{name}'s screen time will appear once her phone syncs."
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    radius = 24.dp,
+                    padding = 20.dp
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(ChildColors.IconCircleBg),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = FocalIcons.Smartphone,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Text(
+                            text = "$childName's screen time will appear once her phone syncs.",
+                            style = typography.body.copy(
+                                fontSize = 14.sp,
+                                color = ChildColors.Secondary,
+                                lineHeight = 20.sp
+                            ),
+                            maxLines = 2
+                        )
+                    }
+                }
+            } else if (insightsData.hasUsageAccess && insightsData.topApps.isNotEmpty()) {
+                // "Most used apps" GlassCard
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     padding = 18.dp
@@ -1904,7 +2090,6 @@ fun InsightsScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // 32dp rounded tile
                             Box(
                                 modifier = Modifier
                                     .size(32.dp)
@@ -1960,7 +2145,6 @@ fun InsightsScreen(
 
                                 Spacer(Modifier.height(6.dp))
 
-                                // 5dp progress track (#1E1E1E track with white indicator)
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -2069,7 +2253,7 @@ fun InsightsScreen(
 
                     Spacer(Modifier.height(12.dp))
 
-                    val avgScreenText = if (insightsData.hasUsageAccess && insightsData.dailyAverageScreenTimeMinutes != null) {
+                    val avgScreenText = if (isThisPhone && insightsData.hasUsageAccess && insightsData.dailyAverageScreenTimeMinutes != null) {
                         val scrH = insightsData.dailyAverageScreenTimeMinutes / 60
                         val scrM = insightsData.dailyAverageScreenTimeMinutes % 60
                         "${scrH}h ${scrM}m"
@@ -2095,9 +2279,7 @@ fun InsightsScreen(
                             fontSize = 12.sp,
                             color = ChildColors.Secondary
                         ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 2
                     )
                 }
 
@@ -2125,7 +2307,7 @@ fun InsightsScreen(
                     Spacer(Modifier.height(12.dp))
 
                     Text(
-                        text = "${insightsData.blockedAttemptsCount}",
+                        text = "${if (isThisPhone) insightsData.blockedAttemptsCount else blockedCount}",
                         style = typography.title.copy(
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
@@ -2142,9 +2324,7 @@ fun InsightsScreen(
                             fontSize = 12.sp,
                             color = ChildColors.Secondary
                         ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 2
                     )
                 }
             }
@@ -2214,6 +2394,30 @@ fun InsightsScreen(
                         )
                     }
                 }
+            }
+        }
+    }
+
+    if (onBack != null) {
+        DetailScaffold(
+            title = "${childName}'s Insights",
+            onBack = onBack
+        ) {
+            InsightsBody(bottomPadding = 36.dp)
+        }
+    } else {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            GlowArcs()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+            ) {
+                InsightsBody(bottomPadding = 110.dp)
             }
         }
     }
@@ -2299,9 +2503,7 @@ fun DetailScaffold(
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     ),
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 2
                 )
 
                 if (subtitle != null) {
@@ -2312,9 +2514,7 @@ fun DetailScaffold(
                             fontSize = 14.sp,
                             color = ChildColors.Secondary
                         ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 2
                     )
                 }
 
@@ -2398,9 +2598,7 @@ fun InfoCard(
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 2
                     )
                 }
                 if (index < rows.size - 1) {
@@ -2464,9 +2662,7 @@ fun IconRowCard(
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White
                             ),
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                         if (item.subtitle.isNotBlank()) {
                             Spacer(Modifier.height(2.dp))
@@ -2476,9 +2672,7 @@ fun IconRowCard(
                                     fontSize = 12.sp,
                                     color = ChildColors.Secondary
                                 ),
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
+                                maxLines = 2
                             )
                         }
                     }
@@ -2514,11 +2708,7 @@ fun ConnectedParentScreen(
     val parent = repository.controllerUser
     val isLinked = parent.name.isNotBlank() || repository.childrenList.isNotEmpty()
     val parentDisplayName = if (parent.name.isBlank()) "Priya Sharma" else parent.name
-    val parentInitials = parentDisplayName.split(" ")
-        .mapNotNull { it.firstOrNull()?.toString() }
-        .take(2)
-        .joinToString("")
-        .ifEmpty { "PS" }
+    val parentInitials = com.focal.app.ui.child.components.getAvatarInitials(parentDisplayName)
     val relation = "Mom"
 
     val manufacturer = remember { PlatformPermissionsHelper.getDeviceManufacturer() }
@@ -2572,9 +2762,7 @@ fun ConnectedParentScreen(
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 2
                     )
 
                     Spacer(Modifier.height(4.dp))
@@ -2710,8 +2898,10 @@ fun FocalCardScreen(
 
     val user = repository.currentUser
     val childProfile = repository.childrenList.find { it.userId == user.id || it.id == user.id }
-    val cardId = childProfile?.pairedCardId ?: "FC0001"
-    val isCardPaired = cardId.isNotBlank()
+    val pairedCard = repository.nfcCards.firstOrNull { it.cardId == childProfile?.pairedCardId }
+        ?: repository.nfcCards.firstOrNull()
+    val isCardPaired = pairedCard != null
+    val cardId = pairedCard?.cardId ?: ""
 
     val parent = repository.controllerUser
     val parentDisplayName = if (parent.name.isBlank()) "Priya Sharma" else parent.name
@@ -2747,101 +2937,140 @@ fun FocalCardScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // StatusPill: "● Paired & active"
-            Row(
-                modifier = Modifier
-                    .height(32.dp)
-                    .clip(CircleShape)
-                    .border(1.dp, ChildColors.BorderStrong, CircleShape)
-                    .background(ChildColors.BannerBg)
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(if (isCardPaired) Color.White else ChildColors.Tertiary)
-                )
+            if (!isCardPaired) {
+                // Empty state: "No card yet" + "Add a card"
                 Text(
-                    text = if (isCardPaired) "Paired & active" else "No card linked",
-                    style = typography.caption.copy(
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
+                    text = "No card yet",
+                    style = typography.title.copy(fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    text = "Tap a card on this phone to pair it with your account.",
+                    style = typography.caption.copy(color = ChildColors.Secondary, textAlign = TextAlign.Center),
+                    modifier = Modifier.padding(horizontal = 24.dp)
+                )
+
+                Spacer(Modifier.height(24.dp))
+
+                ChildPrimaryButton(
+                    text = "Add a card",
+                    leadingIcon = {
+                        Icon(
+                            imageVector = FocalIcons.Nfc,
+                            contentDescription = null,
+                            tint = Color.Black,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = { showTestCardSheet = true },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                // StatusPill: "● Paired & active"
+                Row(
+                    modifier = Modifier
+                        .height(32.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, ChildColors.BorderStrong, CircleShape)
+                        .background(ChildColors.BannerBg)
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                    )
+                    Text(
+                        text = "Paired & active",
+                        style = typography.caption.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+                    )
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                val linkedBy: String = if (!pairedCard.ownerName.isNullOrBlank()) pairedCard.ownerName!! else "$parentDisplayName ($relation)"
+                val lastUsedText: String = if (pairedCard.lastUsed.isNotBlank()) {
+                    if (!pairedCard.lastUsedChildName.isNullOrBlank()) "${pairedCard.lastUsed} · ${pairedCard.lastUsedChildName}" else pairedCard.lastUsed
+                } else {
+                    "Not used yet"
+                }
+
+                InfoCard(
+                    rows = listOf(
+                        InfoCardRow("Card ID", pairedCard.cardId),
+                        InfoCardRow("Linked by", linkedBy),
+                        InfoCardRow("Last used", lastUsedText)
                     )
                 )
-            }
 
-            Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(16.dp))
 
-            InfoCard(
-                rows = listOf(
-                    InfoCardRow("Card ID", cardId),
-                    InfoCardRow("Linked by", "$parentDisplayName ($relation)"),
-                    InfoCardRow("Last used", "Today, 10:02 AM")
-                )
-            )
-
-            Spacer(Modifier.height(16.dp))
-
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                radius = 24.dp,
-                padding = 18.dp
-            ) {
-                Row(
+                GlassCard(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    radius = 24.dp,
+                    padding = 18.dp
                 ) {
-                    IconCircle(size = 44.dp) {
-                        Icon(
-                            imageVector = FocalIcons.InfoCircleAlert,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Lost your card?",
-                            style = typography.body.copy(
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
-                            ),
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            text = "Ask your parent to replace it in their app. The old card stops working right away.",
-                            style = typography.caption.copy(
-                                fontSize = 13.sp,
-                                color = ChildColors.Secondary
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconCircle(size = 44.dp) {
+                            Icon(
+                                imageVector = FocalIcons.InfoCircleAlert,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
                             )
-                        )
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Lost your card?",
+                                style = typography.body.copy(
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                ),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = "Ask your parent to replace it in their app. The old card stops working right away.",
+                                style = typography.caption.copy(
+                                    fontSize = 13.sp,
+                                    color = ChildColors.Secondary
+                                )
+                            )
+                        }
                     }
                 }
+
+                Spacer(Modifier.height(20.dp))
+
+                ChildSecondaryButton(
+                    text = "Test my card",
+                    leadingIcon = {
+                        Icon(
+                            imageVector = FocalIcons.Nfc,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = { showTestCardSheet = true },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
-
-            Spacer(Modifier.height(20.dp))
-
-            ChildSecondaryButton(
-                text = "Test my card",
-                leadingIcon = {
-                    Icon(
-                        imageVector = FocalIcons.Nfc,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = { showTestCardSheet = true },
-                modifier = Modifier.fillMaxWidth()
-            )
         }
 
         if (showTestCardSheet) {
@@ -2856,11 +3085,22 @@ fun FocalCardScreen(
 
             com.focal.app.ui.child.components.TapCardBottomSheet(
                 isEndingFocus = false,
-                overlineText = "TEST CARD",
+                overlineText = if (pairedCard == null) "ADD CARD" else "TEST CARD",
                 readerState = readerState,
                 onDismiss = { showTestCardSheet = false },
                 onCardScanned = {
-                    // Test card success: NOT starting or ending focus!
+                    if (pairedCard == null || repository.nfcCards.isEmpty()) {
+                        val newCard = repository.writeAndRegisterBlankCard(
+                            repository.controllerUser.id,
+                            repository.controllerUser.name
+                        )
+                        childProfile?.let { cp ->
+                            val idx = repository.childrenList.indexOfFirst { it.id == cp.id }
+                            if (idx >= 0) {
+                                repository.childrenList[idx] = cp.copy(pairedCardId = newCard.cardId)
+                            }
+                        }
+                    }
                     readerState = com.focal.app.ui.child.components.ReaderState.SUCCESS
                     coroutineScope.launch {
                         kotlinx.coroutines.delay(1000)
@@ -3554,9 +3794,7 @@ fun HelpScreen(onBack: () -> Unit) {
                                 fontSize = 13.sp,
                                 color = ChildColors.Secondary
                             ),
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                     }
                 }
@@ -3706,9 +3944,7 @@ fun PrivacyChecklistCard(
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White
                         ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 2
                     )
                 }
                 if (index < items.size - 1) {
@@ -4289,15 +4525,11 @@ fun ChildProfileScreen(
 
     val user = repository.currentUser
     val displayName = if (user.name.contains("Rahul", ignoreCase = true)) "Aarav" else user.name
-    val displayInitials = if (displayName == "Aarav") "AR" else displayName.take(2).uppercase()
+    val displayInitials = com.focal.app.ui.child.components.getAvatarInitials(displayName)
 
     val parent = repository.controllerUser
     val parentDisplayName = if (parent.name.isBlank()) "Priya Sharma" else parent.name
-    val parentInitials = parentDisplayName.split(" ")
-        .mapNotNull { it.firstOrNull()?.toString() }
-        .take(2)
-        .joinToString("")
-        .ifEmpty { "PS" }
+    val parentInitials = com.focal.app.ui.child.components.getAvatarInitials(parentDisplayName)
 
     val streakDays = remember { StreakRepository.instance.getStreak().coerceAtLeast(3) }
     val focusTodayMinutes = remember { 135 } // 2h 15m
@@ -4318,7 +4550,9 @@ fun ChildProfileScreen(
             PlatformPermissionsHelper.isDeviceAdminActive()
 
     val childProfile = repository.childrenList.find { it.userId == user.id || it.id == user.id }
-    val cardIdText = childProfile?.pairedCardId ?: "FC0001"
+    val pairedCard = repository.nfcCards.firstOrNull { it.cardId == childProfile?.pairedCardId }
+        ?: repository.nfcCards.firstOrNull()
+    val cardIdText = pairedCard?.cardId ?: ""
 
     val isIos = remember {
         com.example.myapplication.getPlatform().name.contains("iOS", ignoreCase = true)
@@ -4392,9 +4626,7 @@ fun ChildProfileScreen(
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 ),
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
+                                maxLines = 2
                             )
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
@@ -4403,9 +4635,7 @@ fun ChildProfileScreen(
                                     color = ChildColors.Secondary,
                                     fontSize = 13.sp
                                 ),
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
+                                maxLines = 2
                             )
                         }
 
@@ -4562,9 +4792,7 @@ fun ChildProfileScreen(
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color.White
                                 ),
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
+                                maxLines = 2
                             )
                         }
 
@@ -4612,7 +4840,7 @@ fun ChildProfileScreen(
                     ProfileSettingsRow(
                         icon = FocalIcons.Card,
                         title = "FOCAL card",
-                        subtitle = if (cardIdText.isNotBlank()) "$cardIdText · Paired & active" else "No card linked",
+                        subtitle = if (cardIdText.isNotBlank()) "$cardIdText · Paired & active" else "No card yet",
                         onClick = { onNavigateSubScreen(ChildSubScreen.FOCAL_CARD) }
                     )
 
@@ -4622,8 +4850,8 @@ fun ChildProfileScreen(
                     ProfileSettingsRow(
                         icon = FocalIcons.ShieldCheck,
                         title = "Protection",
-                        subtitle = if (allPermsOn) "All 7 permissions on" else "Protection is off",
-                        subtitleColor = if (allPermsOn) ChildColors.Secondary else ChildColors.Danger,
+                        subtitle = if (repository.isDeviceProtectionActive()) "All permissions on" else "Protection is off",
+                        subtitleColor = if (repository.isDeviceProtectionActive()) ChildColors.Secondary else ChildColors.Danger,
                         onClick = { onNavigateSubScreen(ChildSubScreen.PROTECTION) }
                     )
 
@@ -4759,9 +4987,7 @@ private fun ProfileSettingsRow(
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White
                 ),
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
@@ -4770,9 +4996,7 @@ private fun ProfileSettingsRow(
                     fontSize = 12.sp,
                     color = subtitleColor
                 ),
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
         }
 

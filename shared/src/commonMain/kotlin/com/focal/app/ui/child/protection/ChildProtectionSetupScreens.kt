@@ -210,7 +210,7 @@ fun AccessibilityDisclosureScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(54.dp)
+                        .heightIn(min = 54.dp)
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -272,9 +272,7 @@ private fun DisclosureCapabilityRow(
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White
                 ),
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
@@ -284,8 +282,7 @@ private fun DisclosureCapabilityRow(
                     lineHeight = 18.sp,
                     color = ChildColors.Secondary
                 ),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
         }
     }
@@ -557,14 +554,14 @@ fun ProtectionSetupScreen(
                         enabled = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(54.dp)
+                            .heightIn(min = 54.dp)
                     )
                 } else {
                     // Disabled style: dark #1A1A1A container, text #6B6B6B, no glow
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(54.dp)
+                            .heightIn(min = 54.dp)
                             .clip(RoundedCornerShape(999.dp))
                             .background(ChildColors.IconCircleBg),
                         contentAlignment = Alignment.Center
@@ -644,9 +641,7 @@ private fun ChecklistPermissionRow(
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White
                 ),
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
@@ -655,9 +650,7 @@ private fun ChecklistPermissionRow(
                     fontSize = 12.sp,
                     color = ChildColors.Secondary
                 ),
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
         }
 
@@ -885,9 +878,7 @@ fun SetupCompleteScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White
                             ),
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
@@ -896,9 +887,7 @@ fun SetupCompleteScreen(
                                 fontSize = 13.sp,
                                 color = ChildColors.Secondary
                             ),
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                     }
                 }
@@ -918,7 +907,7 @@ fun SetupCompleteScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp)
+                    .heightIn(min = 54.dp)
             )
 
             Spacer(modifier = Modifier.height(16.dp))

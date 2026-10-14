@@ -19,6 +19,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,6 +98,32 @@ fun ChildDetailScreen(
     var showPolicyPickerSheet by remember { mutableStateOf(false) }
     var showDurationSheet by remember { mutableStateOf(false) }
 
+    // 1-second ticker for live timer
+    var tickerNow by remember { mutableStateOf(currentTimeMillis()) }
+    LaunchedEffect(currentChild.isFocusing) {
+        if (currentChild.isFocusing) {
+            while (true) {
+                delay(1000)
+                tickerNow = currentTimeMillis()
+            }
+        }
+    }
+
+    val liveRemainingSecs = remember(tickerNow, currentChild.isFocusing, currentChild.focusEndsAtMillis, currentChild.remainingMinutes) {
+        if (!currentChild.isFocusing) 0L
+        else if (currentChild.focusEndsAtMillis > 0L) {
+            maxOf(0L, (currentChild.focusEndsAtMillis - tickerNow) / 1000L)
+        } else {
+            (currentChild.remainingMinutes * 60L).coerceAtLeast(0L)
+        }
+    }
+    val isActuallyFocusing = currentChild.isFocusing && liveRemainingSecs > 0L
+    val totalFocusSecs = (currentChild.focusTotalMinutes * 60L).coerceAtLeast(1L)
+    val progressVal = if (isActuallyFocusing) (liveRemainingSecs.toFloat() / totalFocusSecs.toFloat()).coerceIn(0f, 1f) else 0f
+    val remMins = liveRemainingSecs / 60
+    val remSecs = liveRemainingSecs % 60
+    val timeText = "${remMins}:${if (remSecs < 10) "0$remSecs" else "$remSecs"}"
+
     when (currentSubScreen) {
         ChildDetailSubScreen.SCHEDULES -> {
             ChildSchedulesScreen(
@@ -130,51 +157,10 @@ fun ChildDetailScreen(
         }
 
         ChildDetailSubScreen.INSIGHTS -> {
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Back header for Insights sub-screen
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 20.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF0B0B0B))
-                                .border(1.dp, Color(0xFF262626), CircleShape)
-                                .clickable { currentSubScreen = null },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = FocalIcons.ArrowBack,
-                                contentDescription = "Back",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Text(
-                            text = "${currentChild.name}'s Insights",
-                            style = typography.headline.copy(
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    // Reuse InsightsScreen
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        InsightsScreen()
-                    }
-                }
-            }
+            InsightsScreen(
+                childId = currentChild.id,
+                onBack = { currentSubScreen = null }
+            )
         }
 
         null -> {
@@ -240,9 +226,7 @@ fun ChildDetailScreen(
 
                     // Initials Avatar (76dp)
                     val initials = remember(currentChild.name) {
-                        val parts = currentChild.name.trim().split(" ").filter { it.isNotBlank() }
-                        if (parts.size >= 2) "${parts.first().firstOrNull() ?: ""}${parts.last().firstOrNull() ?: ""}".uppercase()
-                        else currentChild.name.take(2).uppercase().ifEmpty { "CH" }
+                        com.focal.app.ui.child.components.getAvatarInitials(currentChild.name)
                     }
 
                     Box(
@@ -273,8 +257,7 @@ fun ChildDetailScreen(
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 2
                     )
 
                     Spacer(Modifier.height(4.dp))
@@ -298,14 +281,13 @@ fun ChildDetailScreen(
                             fontSize = 13.sp,
                             color = ChildColors.Secondary
                         ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 2
                     )
 
                     Spacer(Modifier.height(20.dp))
 
                     // STATUS CARD (GlassCard, radius 24dp)
-                    val isProtectionOff = currentChild.isProtectionOff || (FocalRepository.instance.isProtectionDisabledOnChild && currentChild.id == "child_1")
+                    val isProtectionOff = repository.isChildProtectionOff(currentChild.id)
                     val isPhoneNotConnected = currentChild.deviceName.isBlank()
 
                     GlassCard(
@@ -317,7 +299,7 @@ fun ChildDetailScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            if (currentChild.isFocusing) {
+                            if (isActuallyFocusing) {
                                 // ● FOCUSING state
                                 Box(
                                     modifier = Modifier
@@ -349,11 +331,6 @@ fun ChildDetailScreen(
                                 Spacer(Modifier.height(20.dp))
 
                                 // CountdownRing (150dp)
-                                val remMins = if (currentChild.remainingMinutes > 0) currentChild.remainingMinutes else 42
-                                val remSecs = 18
-                                val timeText = "${remMins}:${if (remSecs < 10) "0$remSecs" else "$remSecs"}"
-                                val progressVal = 0.65f
-
                                 CountdownRing(
                                     progress = progressVal,
                                     modifier = Modifier.size(150.dp),
@@ -394,8 +371,7 @@ fun ChildDetailScreen(
                                         fontSize = 13.sp,
                                         color = ChildColors.Secondary
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
 
                                 Spacer(Modifier.height(16.dp))
@@ -403,7 +379,7 @@ fun ChildDetailScreen(
                                 SecondaryButton(
                                     text = "End focus now",
                                     onClick = { showEndFocusConfirmDialog = true },
-                                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                                 )
                             } else if (isPhoneNotConnected) {
                                 // Phone not connected yet state
@@ -463,7 +439,46 @@ fun ChildDetailScreen(
                                     }
                                 }
 
-                                if (isProtectionOff) {
+                                val isChildUnlocked = repository.isParentGuardUnlocked()
+                                val nowMs = com.focal.app.model.currentTimeMillis()
+                                val unlockMinsLeft = ((repository.parentUnlockedUntilMs - nowMs) / 60000L).coerceAtLeast(1)
+
+                                if (isChildUnlocked) {
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = "Unlocked on ${currentChild.name}'s phone · $unlockMinsLeft min left",
+                                            style = typography.caption.copy(
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color.White
+                                            ),
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        if (com.focal.app.config.FocalConfig.isDemoMode) {
+                                            Text(
+                                                text = "Lock now",
+                                                style = typography.caption.copy(
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White
+                                                ),
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .clickable {
+                                                        repository.clearParentUnlock()
+                                                        com.focal.app.protection.ProtectionStateRepository.instance.clearParentUnlock()
+                                                        PlatformPermissionsHelper.showToast("Protection is back on")
+                                                    }
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                } else if (isProtectionOff) {
                                     Spacer(Modifier.height(8.dp))
                                     Text(
                                         text = "Protection is off on this phone",
@@ -520,8 +535,7 @@ fun ChildDetailScreen(
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 1
                                 )
                                 Spacer(Modifier.height(4.dp))
                                 Text(
@@ -530,8 +544,7 @@ fun ChildDetailScreen(
                                         fontSize = 12.sp,
                                         color = ChildColors.Secondary
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
                             }
                         }
@@ -556,8 +569,7 @@ fun ChildDetailScreen(
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 1
                                 )
                                 Spacer(Modifier.height(4.dp))
                                 Text(
@@ -566,8 +578,7 @@ fun ChildDetailScreen(
                                         fontSize = 12.sp,
                                         color = ChildColors.Secondary
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
                             }
                         }
@@ -957,8 +968,7 @@ private fun ChildSettingRow(
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White
                 ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
 
             Spacer(Modifier.height(2.dp))
@@ -969,8 +979,7 @@ private fun ChildSettingRow(
                     fontSize = 12.sp,
                     color = if (isSubtitleRed) Color(0xFFFF453A) else ChildColors.Secondary
                 ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
         }
 
@@ -1376,7 +1385,41 @@ fun StartFocusSheet(
                 }
             }
 
-            Spacer(Modifier.height(28.dp))
+            val unprotectedChildren = selectedChildrenIds
+                .mapNotNull { id -> repository.childrenList.find { it.id == id } }
+                .filter { repository.isChildProtectionOff(it.id) }
+
+            if (unprotectedChildren.isNotEmpty()) {
+                val childNames = unprotectedChildren.joinToString(" and ") { it.name }
+                val warningText = "$childNames's phone isn't protected. Apps won't be blocked until protection is turned on."
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    radius = 16.dp,
+                    padding = 14.dp
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = FocalIcons.InfoCircleAlert,
+                            contentDescription = "Alert",
+                            tint = Color(0xFFFF453A),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = warningText,
+                            style = typography.caption.copy(
+                                fontSize = 13.sp,
+                                color = ChildColors.Secondary,
+                                lineHeight = 18.sp
+                            ),
+                            maxLines = 2
+                        )
+                    }
+                }
+            }
 
             // Primary Button "Start for {duration}"
             val isEnabled = selectedChildrenIds.isNotEmpty()
@@ -1487,8 +1530,7 @@ fun ChildSchedulesScreen(
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
 
             Spacer(Modifier.height(4.dp))
@@ -1602,8 +1644,7 @@ fun ChildSchedulesScreen(
                                             fontWeight = FontWeight.SemiBold,
                                             color = Color.White
                                         ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        maxLines = 2
                                     )
 
                                     Spacer(Modifier.height(2.dp))
@@ -1614,8 +1655,7 @@ fun ChildSchedulesScreen(
                                             fontSize = 13.sp,
                                             color = ChildColors.Secondary
                                         ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        maxLines = 2
                                     )
 
                                     Spacer(Modifier.height(2.dp))
@@ -1626,8 +1666,7 @@ fun ChildSchedulesScreen(
                                             fontSize = 13.sp,
                                             color = ChildColors.Secondary
                                         ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        maxLines = 2
                                     )
                                 }
 
@@ -2010,8 +2049,7 @@ fun ScheduleEditorScreen(
                                     fontSize = 12.sp,
                                     color = ChildColors.Secondary
                                 ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                maxLines = 2
                             )
                         }
 
@@ -2264,7 +2302,8 @@ fun PhoneAndCardScreen(
     repository: FocalRepository = FocalRepository.instance
 ) {
     val typography = LocalChildTypography.current
-    val isProtectionOff = child.isProtectionOff || (FocalRepository.instance.isProtectionDisabledOnChild && child.id == "child_1")
+    val isThisDevice = child.id == "child_1"
+    val isProtectionOff = repository.isChildProtectionOff(child.id)
 
     DetailScaffold(
         title = "Phone & card",
@@ -2311,42 +2350,42 @@ fun PhoneAndCardScreen(
                         icon = FocalIcons.Accessibility,
                         title = "Accessibility service",
                         subtitle = "Blocks apps and websites",
-                        isGranted = !isProtectionOff
+                        isGranted = if (isThisDevice) PlatformPermissionsHelper.isAccessibilityEnabled() else !isProtectionOff
                     )
                     ChildDivider()
                     PermissionRowItem(
                         icon = FocalIcons.DisplayOverlay,
                         title = "Display over other apps",
                         subtitle = "Shows the block screen",
-                        isGranted = true
+                        isGranted = if (isThisDevice) PlatformPermissionsHelper.isOverlayEnabled() else true
                     )
                     ChildDivider()
                     PermissionRowItem(
                         icon = FocalIcons.Shield,
                         title = "Device admin",
                         subtitle = "Stops uninstalling FOCAL",
-                        isGranted = true
+                        isGranted = if (isThisDevice) PlatformPermissionsHelper.isDeviceAdminActive() else true
                     )
                     ChildDivider()
                     PermissionRowItem(
                         icon = FocalIcons.Chart,
                         title = "Usage access",
                         subtitle = "Screen time in Insights",
-                        isGranted = true
+                        isGranted = if (isThisDevice) PlatformPermissionsHelper.isUsageAccessEnabled() else true
                     )
                     ChildDivider()
                     PermissionRowItem(
                         icon = FocalIcons.Bell,
                         title = "Notifications",
                         subtitle = "Focus and schedule alerts",
-                        isGranted = true
+                        isGranted = if (isThisDevice) PlatformPermissionsHelper.isNotificationPermissionGranted() else true
                     )
                     ChildDivider()
                     PermissionRowItem(
                         icon = FocalIcons.Battery,
                         title = "Battery unrestricted",
                         subtitle = "Keeps FOCAL running",
-                        isGranted = true
+                        isGranted = if (isThisDevice) PlatformPermissionsHelper.isBatteryOptimizationDisabled() else true
                     )
                 }
             }

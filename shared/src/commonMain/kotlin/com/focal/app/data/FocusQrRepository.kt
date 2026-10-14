@@ -45,7 +45,7 @@ class LocalFocusQrRepository : FocusQrRepository {
         val updated = FamilyFocusQr(
             familyId = familyId,
             secretToken = newSecret,
-            qrPayload = "focal://focus?familyId=$familyId&secret=$newSecret",
+            qrPayload = "focal://focus?familyId=$familyId&secret=$newSecret&f=$familyId&s=$newSecret",
             createdAtMillis = currentTimeMillis()
         )
         currentQr = updated
@@ -63,11 +63,10 @@ class LocalFocusQrRepository : FocusQrRepository {
         if (currentQr.familyId == familyId && currentQr.qrPayload == trimmed) {
             return true
         }
-        // URL format validation with secret token
-        if (trimmed.startsWith("focal://focus", ignoreCase = true) &&
-            trimmed.contains("familyId=$familyId", ignoreCase = true) &&
-            trimmed.contains("secret=${currentQr.secretToken}", ignoreCase = true)
-        ) {
+        // URL format validation with secret token (supports both f=/s= and familyId=/secret=)
+        val hasFamily = trimmed.contains("f=$familyId", ignoreCase = true) || trimmed.contains("familyId=$familyId", ignoreCase = true)
+        val hasSecret = trimmed.contains("s=${currentQr.secretToken}", ignoreCase = true) || trimmed.contains("secret=${currentQr.secretToken}", ignoreCase = true)
+        if (trimmed.startsWith("focal://focus", ignoreCase = true) && hasFamily && hasSecret) {
             return true
         }
         // Also support general family QR prefix format for testing
@@ -86,7 +85,7 @@ class LocalFocusQrRepository : FocusQrRepository {
         return FamilyFocusQr(
             familyId = familyId,
             secretToken = defaultSecret,
-            qrPayload = "focal://focus?familyId=$familyId&secret=$defaultSecret",
+            qrPayload = "focal://focus?familyId=$familyId&secret=$defaultSecret&f=$familyId&s=$defaultSecret",
             createdAtMillis = currentTimeMillis()
         )
     }

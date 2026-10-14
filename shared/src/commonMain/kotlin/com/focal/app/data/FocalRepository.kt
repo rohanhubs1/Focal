@@ -146,7 +146,9 @@ class FocalRepository private constructor() {
             streakDays = 3,
             currentSessionId = "sess_active_1",
             remainingMinutes = 42,
-            pairedCardId = "FC0001",
+            focusEndsAtMillis = currentTimeMillis() + 42 * 60 * 1000L,
+            focusTotalMinutes = 90,
+            pairedCardId = null,
             deviceName = "Realme · Android 14"
         ),
         ChildProfile(
@@ -168,7 +170,7 @@ class FocalRepository private constructor() {
             streakDays = 5,
             currentSessionId = null,
             remainingMinutes = 0,
-            pairedCardId = "FC0001",
+            pairedCardId = null,
             deviceName = "Kiara's Galaxy Tab"
         )
     )
@@ -282,24 +284,8 @@ class FocalRepository private constructor() {
         )
     )
 
-    // Registered NFC Cards (ONE family card for the entire family by default)
-    val nfcCards = mutableStateListOf(
-        FocusCard(
-            id = "card_family_1",
-            cardId = "FC0001",
-            token = "FC0001_TOKEN",
-            familyId = "family_1",
-            ownerParentId = "user_priya",
-            ownerId = "user_priya",
-            ownerName = "Priya Sharma",
-            assignedChildId = null,
-            status = CardStatus.ACTIVE,
-            isEnabled = true,
-            registeredAt = "12 Sep 2026",
-            ndefPayload = "FOCUSCARD:FC0001",
-            lastUsed = "Today, 10:02 AM"
-        )
-    )
+    // Registered NFC Cards (starts empty, cards added on this phone)
+    val nfcCards = mutableStateListOf<FocusCard>()
 
     // QR Tokens
     val qrTokens = mutableStateListOf(
@@ -595,6 +581,9 @@ class FocalRepository private constructor() {
             ndefPayload = "FOCUSCARD:$generatedToken"
         )
         nfcCards.add(0, newCard)
+        if (childrenList.isNotEmpty() && childrenList[0].pairedCardId == null) {
+            childrenList[0] = childrenList[0].copy(pairedCardId = cardId)
+        }
         return newCard
     }
 
@@ -684,7 +673,17 @@ class FocalRepository private constructor() {
             return Result.failure(Exception(message))
         }
 
-        return Result.success(card)
+        val time = com.focal.app.streak.getDeviceCurrentTime()
+        val h = if (time.hour24 % 12 == 0) 12 else time.hour24 % 12
+        val ampm = if (time.hour24 < 12) "AM" else "PM"
+        val timeStr = "Today, $h:${time.minute.toString().padStart(2, '0')} $ampm"
+        val cardIdx = nfcCards.indexOf(card)
+        val updatedCard = card.copy(lastUsed = timeStr, lastUsedChildName = childUser.name)
+        if (cardIdx >= 0) {
+            nfcCards[cardIdx] = updatedCard
+        }
+
+        return Result.success(updatedCard)
     }
 
     // Validate NFC card for ending focus early (family-wide card)
@@ -706,7 +705,17 @@ class FocalRepository private constructor() {
             return Result.failure(Exception("This card has been disabled by your parent."))
         }
 
-        return Result.success(card)
+        val time = com.focal.app.streak.getDeviceCurrentTime()
+        val h = if (time.hour24 % 12 == 0) 12 else time.hour24 % 12
+        val ampm = if (time.hour24 < 12) "AM" else "PM"
+        val timeStr = "Today, $h:${time.minute.toString().padStart(2, '0')} $ampm"
+        val cardIdx = nfcCards.indexOf(card)
+        val updatedCard = card.copy(lastUsed = timeStr, lastUsedChildName = childUser.name)
+        if (cardIdx >= 0) {
+            nfcCards[cardIdx] = updatedCard
+        }
+
+        return Result.success(updatedCard)
     }
 
     // Disable a family card immediately across all child devices
@@ -790,8 +799,27 @@ class FocalRepository private constructor() {
 
     // Verify QR token
     fun verifyQrToken(token: String): Result<QrToken> {
-        val qr = qrTokens.find { it.token == token }
-            ?: return Result.failure(Exception("Invalid or expired Focus QR code."))
+        val trimmed = token.trim()
+        if (trimmed.startsWith("focal://pair", ignoreCase = true)) {
+            return Result.failure(Exception("That's not a FOCAL focus QR"))
+        }
+        if (trimmed.startsWith("focal://focus", ignoreCase = true)) {
+            val qr = QrToken(
+                id = "qr_family_focus",
+                token = trimmed,
+                ownerId = "user_priya",
+                childId = currentUser.id,
+                policyId = "policy_study",
+                policyTitle = "Study Mode",
+                durationMinutes = 25,
+                status = "ACTIVE",
+                createdAt = currentTimeMillis().toString(),
+                expiresAt = (currentTimeMillis() + 86400000L).toString()
+            )
+            return Result.success(qr)
+        }
+        val qr = qrTokens.find { it.token.equals(trimmed, ignoreCase = true) }
+            ?: return Result.failure(Exception("That's not a FOCAL focus QR"))
 
         if (qr.status != "ACTIVE") {
             return Result.failure(Exception("This Focus QR token is no longer active."))
@@ -1150,6 +1178,23 @@ class FocalRepository private constructor() {
         return newChild to pairingToken
     }
 
+    // Real Protection State (Accessibility + Overlay + Device Admin required)
+    fun isDeviceProtectionActive(): Boolean {
+        return com.focal.app.ui.components.PlatformPermissionsHelper.isAccessibilityEnabled() &&
+               com.focal.app.ui.components.PlatformPermissionsHelper.isOverlayEnabled() &&
+               com.focal.app.ui.components.PlatformPermissionsHelper.isDeviceAdminActive()
+    }
+
+    fun isChildProtectionOff(childId: String): Boolean {
+        val child = childrenList.find { it.id == childId }
+        val isThisDevice = childId == "child_1" || (currentUser.role == UserRole.CHILD && currentUser.id == child?.userId)
+        return if (isThisDevice) {
+            !isDeviceProtectionActive()
+        } else {
+            child?.isProtectionOff ?: false
+        }
+    }
+
     // Protection Telemetry, Settings Guard & Server Heartbeat Logic
     var isProtectionDisabledOnChild by mutableStateOf(false)
     var protectionDisabledReason by mutableStateOf("")
@@ -1185,6 +1230,11 @@ class FocalRepository private constructor() {
             timestamp = "Just now"
         ))
         return "Parent unlock active for 10 minutes. Settings access permitted."
+    }
+
+    fun clearParentUnlock() {
+        parentUnlockedUntilMs = 0L
+        com.focal.app.protection.ProtectionStateRepository.instance.clearParentUnlock()
     }
 
     fun reportProtectionDisabled(reason: String, childId: String = "child_1") {

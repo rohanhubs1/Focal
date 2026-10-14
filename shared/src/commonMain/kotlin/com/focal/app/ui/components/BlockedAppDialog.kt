@@ -150,9 +150,7 @@ fun ChildBlockScreenContent(
                         color = Color.White
                     ),
                     textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 2
                 )
 
                 Spacer(Modifier.height(8.dp))
@@ -165,9 +163,7 @@ fun ChildBlockScreenContent(
                         color = ChildColors.Secondary
                     ),
                     textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 2
                 )
 
                 Spacer(Modifier.height(36.dp))

@@ -49,6 +49,7 @@ kotlin {
             implementation(libs.camera.lifecycle)
             implementation(libs.camera.view)
             implementation(libs.mlkit.barcode.scanning)
+            implementation(libs.zxing.core)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -68,4 +69,8 @@ kotlin {
 
 dependencies {
     androidRuntimeClasspath(libs.compose.uiTooling)
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.encoding = "UTF-8"
 }

@@ -706,11 +706,7 @@ fun InitialsAvatar(
     modifier: Modifier = Modifier,
     size: Dp = 40.dp
 ) {
-    val initials = name.split(" ")
-        .mapNotNull { it.firstOrNull()?.uppercaseChar() }
-        .take(2)
-        .joinToString("")
-        .ifEmpty { "U" }
+    val initials = com.focal.app.ui.child.components.getAvatarInitials(name)
 
     Box(
         modifier = modifier
@@ -823,8 +819,7 @@ fun FocusTimer(
                     letterSpacing = 1.sp,
                     color = Color.White
                 ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 1
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -1001,13 +996,16 @@ fun FocalTopBar(
         modifier = modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.statusBars)
-            .height(56.dp)
+            .heightIn(min = 56.dp)
             .background(Color.Black)
             .padding(horizontal = FocalSpacing.ScreenPadding),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.weight(1f, fill = false),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             if (onBackClick != null) {
                 FocalIconButton(
                     icon = FocalIcons.ArrowBack,
@@ -1022,8 +1020,7 @@ fun FocalTopBar(
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1617,8 +1614,7 @@ fun SectionHeader(
                     color = FocalColors.TextSecondary,
                     fontWeight = FontWeight.Bold
                 ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                maxLines = 2,
                 modifier = Modifier.weight(1f, fill = false)
             )
             if (actionText != null && onActionClick != null) {

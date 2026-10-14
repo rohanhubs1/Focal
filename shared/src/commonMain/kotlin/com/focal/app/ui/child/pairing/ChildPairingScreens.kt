@@ -352,9 +352,7 @@ fun PairScreen(
                         color = ChildColors.Tertiary,
                         fontSize = 12.sp
                     ),
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 2
                 )
             }
 
@@ -585,8 +583,8 @@ fun ScanParentQrScreen(
                 scanStatus = ScanStatus.Success
                 delay(300)
                 onQrRedeemed(request)
-            }.onFailure {
-                scanStatus = ScanStatus.Invalid
+            }.onFailure { ex ->
+                scanStatus = ScanStatus.Invalid(ex.message ?: "That's not a pairing QR")
                 shakeOffset.snapTo(0f)
                 shakeOffset.animateTo(
                     targetValue = 0f,
@@ -781,7 +779,7 @@ fun ScanParentQrScreen(
                 }
                 is ScanStatus.Invalid -> {
                     StatusPill(
-                        text = "That's not a FOCAL QR",
+                        text = (scanStatus as ScanStatus.Invalid).message,
                         type = StatusPillType.OFF
                     )
                 }
@@ -836,7 +834,7 @@ fun ScanParentQrScreen(
 
 private sealed class ScanStatus {
     object Searching : ScanStatus()
-    object Invalid : ScanStatus()
+    data class Invalid(val message: String = "That's not a pairing QR") : ScanStatus()
     object Success : ScanStatus()
 }
 

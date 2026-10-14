@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -143,31 +144,6 @@ fun FocalRootApp(
     var selectedChildForManagement by remember { mutableStateOf<ChildProfile?>(null) }
     var createdChildNameForPairing by remember { mutableStateOf("Rahul") }
 
-    fun selectChildTab(index: Int) {
-        if (childTabIndex == index) return
-        if (index == 0) {
-            childTabHistory.clear()
-            childTabHistory.add(0)
-        } else {
-            childTabHistory.remove(index)
-            childTabHistory.add(index)
-        }
-        childTabIndex = index
-    }
-
-    fun selectControllerTab(index: Int) {
-        if (controllerTabIndex == index && selectedChildForManagement == null) return
-        selectedChildForManagement = null
-        if (index == 0) {
-            controllerTabHistory.clear()
-            controllerTabHistory.add(0)
-        } else {
-            controllerTabHistory.remove(index)
-            controllerTabHistory.add(index)
-        }
-        controllerTabIndex = index
-    }
-
     // Modals & Overlays state
     var showNfcScanner by remember { mutableStateOf(false) }
     var showQrScanner by remember { mutableStateOf(false) }
@@ -185,10 +161,56 @@ fun FocalRootApp(
     var showNotificationsModal by remember { mutableStateOf(false) }
     var showComponentGallery by remember { mutableStateOf(false) }
     var showRoleSwitcherModal by remember { mutableStateOf(false) }
-    var childSubScreen by remember { mutableStateOf<com.focal.app.ui.child.ChildSubScreen?>(null) }
+    var childSubScreen: com.focal.app.ui.child.ChildSubScreen? by remember { mutableStateOf<com.focal.app.ui.child.ChildSubScreen?>(null) }
     var parentActivityFilter by remember { mutableStateOf<String?>(null) }
 
     val currentUser = repository.currentUser
+
+    fun selectChildTab(index: Int) {
+        childSubScreen = null
+        if (index == 0) {
+            childTabHistory.clear()
+            childTabHistory.add(0)
+        } else {
+            childTabHistory.clear()
+            childTabHistory.add(0)
+            childTabHistory.add(index)
+        }
+        childTabIndex = index
+    }
+
+    fun selectControllerTab(index: Int) {
+        selectedChildForManagement = null
+        isPolicyEditingActive = false
+        isAddChildFlowActive = false
+        isProfileSubScreenActive = false
+        childSubScreen = null
+        if (index == 0) {
+            controllerTabHistory.clear()
+            controllerTabHistory.add(0)
+        } else {
+            controllerTabHistory.clear()
+            controllerTabHistory.add(0)
+            controllerTabHistory.add(index)
+        }
+        controllerTabIndex = index
+    }
+
+    fun navigateToTab(index: Int) {
+        selectedChildForManagement = null
+        isPolicyEditingActive = false
+        isAddChildFlowActive = false
+        isProfileSubScreenActive = false
+        childSubScreen = null
+        profileBackTrigger++
+        policyBackTrigger++
+
+        if (currentUser.role == UserRole.CHILD) {
+            selectChildTab(index)
+        } else {
+            selectControllerTab(index)
+        }
+    }
 
     val canGoBack = remember(
         screenState,
@@ -315,19 +337,19 @@ fun FocalRootApp(
                     if (screenState == AppScreenState.MAIN_APP && (!showActiveFocusScreen || currentUser.role == UserRole.CHILD)) {
                         when (currentUser.role) {
                             UserRole.CHILD -> {
-                                if (childSubScreen == null && !repository.showParentUnlockScreen) {
+                                if (childSubScreen == null && !repository.showParentUnlockScreen && !showNfcScanner && !showQrScanner && !com.focal.app.ui.child.components.FocalSheetTracker.isAnySheetOpen) {
                                     com.focal.app.ui.child.components.ChildBottomNav(
                                         selectedTab = com.focal.app.ui.child.components.ChildTab.entries[childTabIndex],
-                                        onTabSelected = { selectChildTab(it.ordinal) },
+                                        onTabSelected = { navigateToTab(it.ordinal) },
                                         modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
                                     )
                                 }
                             }
                             UserRole.CONTROLLER -> {
-                                if (selectedChildForManagement == null && !isPolicyEditingActive && !isAddChildFlowActive && !isProfileSubScreenActive) {
+                                if (selectedChildForManagement == null && !isPolicyEditingActive && !isAddChildFlowActive && !isProfileSubScreenActive && !com.focal.app.ui.child.components.FocalSheetTracker.isAnySheetOpen) {
                                     com.focal.app.ui.components.ParentBottomNav(
                                         selectedTab = com.focal.app.ui.components.ParentTab.entries.getOrElse(controllerTabIndex) { com.focal.app.ui.components.ParentTab.HOME },
-                                        onTabSelected = { selectControllerTab(it.ordinal) },
+                                        onTabSelected = { navigateToTab(it.ordinal) },
                                         modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
                                     )
                                 }
@@ -425,7 +447,7 @@ fun FocalRootApp(
                                     navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
                                 },
                                 onOpenFocusTab = {
-                                    selectControllerTab(2)
+                                    navigateToTab(2)
                                     navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
                                 },
                                 onCloseToParentHome = {
@@ -441,7 +463,11 @@ fun FocalRootApp(
                                 onPairSuccess = { req ->
                                     activePairRequest = req
                                     pairErrorNotice = null
-                                    navigateToScreen(AppScreenState.CHILD_WAITING_APPROVAL)
+                                    if (req.state == com.focal.app.pairing.PairState.APPROVED) {
+                                        navigateToScreen(AppScreenState.CHILD_PAIRED_SUCCESS)
+                                    } else {
+                                        navigateToScreen(AppScreenState.CHILD_WAITING_APPROVAL)
+                                    }
                                 },
                                 initialError = pairErrorNotice
                             )
@@ -454,7 +480,11 @@ fun FocalRootApp(
                                 onQrRedeemed = { req ->
                                     activePairRequest = req
                                     pairErrorNotice = null
-                                    navigateToScreen(AppScreenState.CHILD_WAITING_APPROVAL)
+                                    if (req.state == com.focal.app.pairing.PairState.APPROVED) {
+                                        navigateToScreen(AppScreenState.CHILD_PAIRED_SUCCESS)
+                                    } else {
+                                        navigateToScreen(AppScreenState.CHILD_WAITING_APPROVAL)
+                                    }
                                 }
                             )
                         }
@@ -583,7 +613,7 @@ fun FocalRootApp(
                                                 onNfcTapClick = { showNfcScanner = true },
                                                 onQrScanClick = { showQrScanner = true },
                                                 onViewActiveSession = { showActiveFocusScreen = true },
-                                                onViewInsights = { selectChildTab(2) },
+                                                onViewInsights = { navigateToTab(2) },
                                                 onOpenPermissions = { childSubScreen = com.focal.app.ui.child.ChildSubScreen.PROTECTION }
                                             )
                                             1 -> SchedulesScreen()
@@ -631,16 +661,16 @@ fun FocalRootApp(
                                                     isAddChildFlowActive = true
                                                 },
                                                 onCreatePolicyClick = {
-                                                    selectControllerTab(1)
+                                                    navigateToTab(1)
                                                     openNewPolicyCounter++
                                                 },
                                                 onOpenPermissions = { PlatformPermissionsHelper.openNotificationSettings() },
                                                 onOpenActivityTab = { filter ->
                                                     parentActivityFilter = filter
-                                                    selectControllerTab(3)
+                                                    navigateToTab(3)
                                                 },
-                                                onOpenFocusTab = { selectControllerTab(2) },
-                                                onStartNowClick = { selectControllerTab(2) }
+                                                onOpenFocusTab = { navigateToTab(2) },
+                                                onStartNowClick = { navigateToTab(2) }
                                             )
                                             1 -> com.focal.app.ui.controller.ParentPoliciesRootFlow(
                                                 onEditingStateChanged = { isPolicyEditingActive = it },
@@ -666,7 +696,7 @@ fun FocalRootApp(
                                                     connectPhoneChildId = null
                                                     isAddChildFlowActive = true
                                                 },
-                                                onGoToFocusTab = { selectControllerTab(2) },
+                                                onGoToFocusTab = { navigateToTab(2) },
                                                 onSubScreenChanged = { isProfileSubScreenActive = it },
                                                 backTrigger = profileBackTrigger,
                                                 repository = repository
@@ -857,32 +887,42 @@ fun FocalRootApp(
                 }
 
                 // DEV Floating Pill Button (Debug Mode / Role Switcher)
-                if (com.focal.app.config.FocalConfig.showDevRoleSwitcher) {
+                val isClientDemo = com.focal.app.data.FocalLocalStorage.getBoolean("KEY_CLIENT_DEMO_MODE", false)
+                if (com.focal.app.config.FocalConfig.showDevRoleSwitcher && !isClientDemo) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .windowInsetsPadding(WindowInsets.statusBars)
-                            .padding(top = 8.dp, end = 12.dp),
-                        contentAlignment = Alignment.TopEnd
+                            .padding(top = 4.dp, start = 8.dp),
+                        contentAlignment = Alignment.TopStart
                     ) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .alpha(0.5f)
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(Color(0xFF1F1F1F))
-                                .border(1.dp, Color(0xFF555555), RoundedCornerShape(12.dp))
+                                .border(1.dp, Color(0xFF555555), RoundedCornerShape(10.dp))
                                 .clickable { showRoleSwitcherModal = true }
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = "DEV",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
-                                    fontSize = 11.sp
+                                    fontSize = 10.sp
                                 )
                             )
                         }
                     }
+                } else if (com.focal.app.config.FocalConfig.showDevRoleSwitcher && isClientDemo) {
+                    // Discreet invisible touch target at top-left to reopen debug menu if needed
+                    Box(
+                        modifier = Modifier
+                            .windowInsetsPadding(WindowInsets.statusBars)
+                            .size(36.dp)
+                            .clickable { showRoleSwitcherModal = true }
+                    )
                 }
 
                 // Role Switcher Modal

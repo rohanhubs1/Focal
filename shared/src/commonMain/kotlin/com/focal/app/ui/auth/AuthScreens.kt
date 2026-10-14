@@ -1821,7 +1821,7 @@ fun FocusMethodScreen(
                 bullets = listOf(
                     Pair(FocalIcons.Bolt, "One tap, no camera needed"),
                     Pair(FocalIcons.Users, "One card for all your children"),
-                    Pair(FocalIcons.Lock, "Works offline")
+                    Pair(FocalIcons.Lock, "Can't be copied")
                 ),
                 isSelected = selectedMethod == FocusMethodType.NFC,
                 onClick = { selectedMethod = FocusMethodType.NFC },

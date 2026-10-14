@@ -215,8 +215,7 @@ fun ParentPoliciesScreen(
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color.White
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
 
                                 Spacer(Modifier.height(4.dp))
@@ -227,8 +226,7 @@ fun ParentPoliciesScreen(
                                         fontSize = 13.sp,
                                         color = ChildColors.Secondary
                                     ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 2
                                 )
 
                                 // "used by" chips under it (24dp tall, #2A2A2A border, 11sp)
@@ -590,8 +588,7 @@ fun PolicyEditorScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White
                             ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
@@ -600,8 +597,7 @@ fun PolicyEditorScreen(
                                 fontSize = 12.sp,
                                 color = ChildColors.Secondary
                             ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                     }
 
@@ -661,12 +657,11 @@ fun PolicyEditorScreen(
                         Text(
                             text = "Websites · ${selectedWebsites.size}",
                             style = typography.headline.copy(
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
+                                 fontSize = 15.sp,
+                                 fontWeight = FontWeight.SemiBold,
+                                 color = Color.White
                             ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
@@ -675,8 +670,7 @@ fun PolicyEditorScreen(
                                 fontSize = 12.sp,
                                 color = ChildColors.Secondary
                             ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2
                         )
                     }
 
@@ -727,8 +721,7 @@ fun PolicyEditorScreen(
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = Color.White
                                             ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            maxLines = 2
                                         )
                                         Spacer(Modifier.height(2.dp))
                                         Text(
@@ -737,8 +730,7 @@ fun PolicyEditorScreen(
                                                 fontSize = 12.sp,
                                                 color = ChildColors.Secondary
                                             ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            maxLines = 2
                                         )
                                     }
                                 }
@@ -1265,8 +1257,7 @@ fun AppPickerScreen(
                                             fontSize = 12.sp,
                                             color = ChildColors.Secondary
                                         ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        maxLines = 2
                                     )
                                 }
 

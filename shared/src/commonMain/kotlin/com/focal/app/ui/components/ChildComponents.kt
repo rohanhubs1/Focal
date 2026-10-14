@@ -10,10 +10,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.*
@@ -116,7 +121,7 @@ fun PrimaryButton(
                 scaleX = scale
                 scaleY = scale
             }
-            .height(54.dp)
+            .heightIn(min = 52.dp)
             .drawBehind {
                 // Soft white glow
                 drawCircle(
@@ -139,7 +144,7 @@ fun PrimaryButton(
                 enabled = enabled,
                 onClick = onClick
             )
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
@@ -148,7 +153,7 @@ fun PrimaryButton(
         ) {
             if (leadingIcon != null) {
                 leadingIcon()
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
             }
             Text(
                 text = text,
@@ -156,12 +161,10 @@ fun PrimaryButton(
                     color = Color.Black,
                     fontWeight = FontWeight.SemiBold
                 ),
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
             if (trailingIcon != null) {
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
                 trailingIcon()
             }
         }
@@ -197,7 +200,7 @@ fun SecondaryButton(
                 scaleX = scale
                 scaleY = scale
             }
-            .height(52.dp)
+            .heightIn(min = 48.dp)
             .clip(shape)
             .background(Color.Transparent)
             .border(1.dp, ChildColors.BorderStrong, shape)
@@ -207,7 +210,7 @@ fun SecondaryButton(
                 enabled = enabled,
                 onClick = onClick
             )
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
@@ -216,7 +219,7 @@ fun SecondaryButton(
         ) {
             if (leadingIcon != null) {
                 leadingIcon()
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
             }
             Text(
                 text = text,
@@ -224,12 +227,10 @@ fun SecondaryButton(
                     color = Color.White,
                     fontWeight = FontWeight.Medium
                 ),
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
             if (trailingIcon != null) {
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
                 trailingIcon()
             }
         }
@@ -277,12 +278,12 @@ fun StreakPill(
     val typography = LocalChildTypography.current
     Row(
         modifier = modifier
-            .height(32.dp)
+            .heightIn(min = 32.dp)
             .wrapContentWidth()
             .clip(CircleShape)
             .border(1.dp, Color.White, CircleShape)
             .background(Color.Transparent)
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -297,10 +298,7 @@ fun StreakPill(
             style = typography.caption.copy(
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold
-            ),
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis
+            )
         )
     }
 }
@@ -329,12 +327,12 @@ fun StatusPill(
 
     Box(
         modifier = modifier
-            .height(32.dp)
+            .heightIn(min = 32.dp)
             .wrapContentWidth()
             .clip(CircleShape)
             .then(borderModifier)
             .background(bg)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 14.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -343,9 +341,7 @@ fun StatusPill(
                 color = textColor,
                 fontWeight = if (type == StatusPillType.ACTIVE) FontWeight.Bold else FontWeight.Medium
             ),
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
     }
 }
@@ -353,7 +349,21 @@ fun StatusPill(
 // =========================================================================
 // 6. Avatar
 // Initials on #171717 circle with 1dp #3A3A3A border (no photos by default).
+// Rule: two words -> first letters ("Priya Sharma" -> "PS"); one word -> first letter only ("Aarav" -> "A").
 // =========================================================================
+fun getAvatarInitials(name: String): String {
+    val trimmed = name.trim()
+    if (trimmed.isEmpty()) return "F"
+    val parts = trimmed.split(Regex("\\s+")).filter { it.isNotBlank() }
+    return if (parts.size >= 2) {
+        val first = parts[0].firstOrNull()?.uppercase() ?: ""
+        val second = parts[1].firstOrNull()?.uppercase() ?: ""
+        "$first$second".ifEmpty { "F" }
+    } else {
+        parts[0].firstOrNull()?.uppercase() ?: "F"
+    }
+}
+
 @Composable
 fun ChildAvatar(
     name: String,
@@ -361,12 +371,7 @@ fun ChildAvatar(
     size: Dp = 44.dp
 ) {
     val typography = LocalChildTypography.current
-    val initials = name.trim().split(" ")
-        .filter { it.isNotEmpty() }
-        .take(2)
-        .map { it.first().uppercase() }
-        .joinToString("")
-        .ifEmpty { "F" }
+    val initials = getAvatarInitials(name)
 
     Box(
         modifier = modifier
@@ -621,70 +626,75 @@ fun FocalCardHero(
     }
 
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(260.dp),
+        modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
         // 1. Radial glow and thin ellipses under the card
         Canvas(modifier = Modifier.fillMaxSize()) {
             val c = Offset(size.width / 2f, size.height / 2f)
+            val scale = (cardWidth.value / 230f).coerceIn(0.35f, 2.0f)
+            val currentPulseScale = if (pulsingRings) pulseScale else 1f
+            val currentPulseAlpha = if (pulsingRings) pulseAlpha else 0.08f
 
             // Radial soft glow behind
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(Color.White.copy(alpha = 0.09f), Color.Transparent),
                     center = c,
-                    radius = 140.dp.toPx()
+                    radius = 140.dp.toPx() * scale
                 ),
-                radius = 140.dp.toPx(),
+                radius = 140.dp.toPx() * scale,
                 center = c
             )
 
             if (ringCount >= 3) {
                 // Outer ring
-                val r1W = 280.dp.toPx() * pulseScale
-                val r1H = 90.dp.toPx() * pulseScale
+                val r1W = 280.dp.toPx() * scale * currentPulseScale
+                val r1H = 90.dp.toPx() * scale * currentPulseScale
                 drawOval(
-                    color = Color.White.copy(alpha = (pulseAlpha * 0.6f).coerceIn(0.03f, 0.15f)),
-                    topLeft = Offset(c.x - r1W / 2f, c.y - r1H / 2f),
+                    color = Color.White.copy(alpha = (currentPulseAlpha * 0.6f).coerceIn(0.03f, 0.15f)),
+                    topLeft = Offset(c.x - r1W / 2f, c.y - r1H / 2f + (cardHeight.toPx() * 0.2f)),
                     size = Size(r1W, r1H),
                     style = Stroke(width = 1.dp.toPx())
                 )
 
                 // Middle ring
-                val r2W = 210.dp.toPx() * pulseScale
-                val r2H = 68.dp.toPx() * pulseScale
+                val r2W = 210.dp.toPx() * scale * currentPulseScale
+                val r2H = 68.dp.toPx() * scale * currentPulseScale
                 drawOval(
-                    color = Color.White.copy(alpha = pulseAlpha.coerceIn(0.05f, 0.18f)),
-                    topLeft = Offset(c.x - r2W / 2f, c.y - r2H / 2f),
+                    color = Color.White.copy(alpha = currentPulseAlpha.coerceIn(0.05f, 0.18f)),
+                    topLeft = Offset(c.x - r2W / 2f, c.y - r2H / 2f + (cardHeight.toPx() * 0.2f)),
                     size = Size(r2W, r2H),
                     style = Stroke(width = 1.dp.toPx())
                 )
 
                 // Inner ring
-                val r3W = 150.dp.toPx() * pulseScale
-                val r3H = 48.dp.toPx() * pulseScale
+                val r3W = 150.dp.toPx() * scale * currentPulseScale
+                val r3H = 48.dp.toPx() * scale * currentPulseScale
                 drawOval(
-                    color = Color.White.copy(alpha = (pulseAlpha * 1.3f).coerceIn(0.06f, 0.22f)),
-                    topLeft = Offset(c.x - r3W / 2f, c.y - r3H / 2f),
+                    color = Color.White.copy(alpha = (currentPulseAlpha * 1.3f).coerceIn(0.06f, 0.22f)),
+                    topLeft = Offset(c.x - r3W / 2f, c.y - r3H / 2f + (cardHeight.toPx() * 0.2f)),
                     size = Size(r3W, r3H),
                     style = Stroke(width = 1.dp.toPx())
                 )
             } else if (ringCount in 1..2) {
                 // Outer ellipse ring
+                val r1W = 280.dp.toPx() * scale * currentPulseScale
+                val r1H = 90.dp.toPx() * scale * currentPulseScale
                 drawOval(
-                    color = Color.White.copy(alpha = 0.05f),
-                    topLeft = Offset(c.x - 140.dp.toPx(), c.y - 45.dp.toPx()),
-                    size = Size(280.dp.toPx(), 90.dp.toPx()),
+                    color = Color.White.copy(alpha = (currentPulseAlpha * 0.7f).coerceIn(0.03f, 0.15f)),
+                    topLeft = Offset(c.x - r1W / 2f, c.y - r1H / 2f + (cardHeight.toPx() * 0.2f)),
+                    size = Size(r1W, r1H),
                     style = Stroke(width = 1.dp.toPx())
                 )
 
                 // Inner ellipse ring
+                val r2W = 220.dp.toPx() * scale * currentPulseScale
+                val r2H = 70.dp.toPx() * scale * currentPulseScale
                 drawOval(
-                    color = Color.White.copy(alpha = 0.08f),
-                    topLeft = Offset(c.x - 110.dp.toPx(), c.y - 35.dp.toPx()),
-                    size = Size(220.dp.toPx(), 70.dp.toPx()),
+                    color = Color.White.copy(alpha = currentPulseAlpha.coerceIn(0.05f, 0.2f)),
+                    topLeft = Offset(c.x - r2W / 2f, c.y - r2H / 2f + (cardHeight.toPx() * 0.2f)),
+                    size = Size(r2W, r2H),
                     style = Stroke(width = 1.dp.toPx())
                 )
             }
@@ -740,57 +750,56 @@ fun FocalCardHero(
 // 11. BottomSheet
 // Top radius 32, background #141414→#0A0A0A, 1dp top border, handle bar, dark scrim behind.
 // =========================================================================
+object FocalSheetTracker {
+    var sheetCount by mutableStateOf(0)
+    val isAnySheetOpen: Boolean get() = sheetCount > 0
+
+    fun onSheetShown() { sheetCount++ }
+    fun onSheetHidden() { sheetCount = (sheetCount - 1).coerceAtLeast(0) }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChildBottomSheet(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.75f))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onDismiss
-            ),
-        contentAlignment = Alignment.BottomCenter
-    ) {
-        Box(
-            modifier = modifier
-                .fillMaxWidth()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = {} // consume clicks inside sheet
-                )
-                .clip(shape)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(ChildColors.BottomSheetBgStart, ChildColors.BottomSheetBgEnd)
-                    )
-                )
-                .border(1.dp, ChildColors.BorderStrong, shape)
-                .padding(horizontal = 20.dp, vertical = 14.dp)
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Handle bar
-                Box(
-                    modifier = Modifier
-                        .width(36.dp)
-                        .height(4.dp)
-                        .clip(CircleShape)
-                        .background(ChildColors.BorderStrong)
-                )
-                Spacer(Modifier.height(18.dp))
-                content()
-            }
+    DisposableEffect(Unit) {
+        FocalSheetTracker.onSheetShown()
+        onDispose {
+            FocalSheetTracker.onSheetHidden()
         }
+    }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color(0xFF141414),
+        scrimColor = Color.Black.copy(alpha = 0.75f),
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .width(36.dp)
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF333333))
+            )
+        },
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            content = content
+        )
     }
 }
 
@@ -919,12 +928,12 @@ fun FocusActivePill(
     val typography = LocalChildTypography.current
     Row(
         modifier = modifier
-            .height(32.dp)
+            .heightIn(min = 32.dp)
             .wrapContentWidth()
             .clip(CircleShape)
             .border(1.dp, ChildColors.BorderStrong, CircleShape)
             .background(ChildColors.BannerBg)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 14.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -940,10 +949,7 @@ fun FocusActivePill(
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.5.sp
-            ),
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis
+            )
         )
     }
 }
@@ -981,60 +987,66 @@ fun TapCardBottomSheet(
         onDismiss = onDismiss,
         modifier = modifier
     ) {
+        Spacer(Modifier.height(4.dp))
         Text(
             text = overlineText ?: if (isEndingFocus) "END FOCUS" else "START FOCUS",
             style = typography.overline.copy(
                 color = ChildColors.Tertiary,
-                letterSpacing = 1.5.sp
+                letterSpacing = 1.5.sp,
+                fontWeight = FontWeight.SemiBold
             ),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         Text(
             text = "Hold your card near the phone",
             style = typography.title.copy(
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = Color.White,
+                lineHeight = 30.sp
             ),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             text = "Keep it still for a second.",
-            style = typography.body.copy(color = ChildColors.Secondary),
+            style = typography.body.copy(color = ChildColors.Secondary, fontSize = 14.sp),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
 
-        // Illustration: FocalCardHero tilted -12° with 3 pulsing concentric ellipse rings
+        // Illustration: FocalCardHero 176dp tilted -12° over two ellipse rings (rings pulse)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(190.dp)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = onCardScanned
-                )
+                ),
+            contentAlignment = Alignment.Center
         ) {
             FocalCardHero(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp),
+                modifier = Modifier.fillMaxSize(),
+                cardWidth = 176.dp,
+                cardHeight = 110.dp,
+                logoSize = 56.dp,
                 tiltAngle = -12f,
                 pulsingRings = true,
-                ringCount = 3
+                ringCount = 2
             )
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
 
         // Reader-state StatusPill
         when (readerState) {
             ReaderState.LISTENING_USB -> {
                 Row(
                     modifier = Modifier
-                        .height(34.dp)
+                        .height(36.dp)
                         .wrapContentWidth()
                         .clip(CircleShape)
                         .border(1.dp, ChildColors.BorderStrong, CircleShape)
@@ -1053,18 +1065,16 @@ fun TapCardBottomSheet(
                         text = "Listening · FOCAL reader connected",
                         style = typography.caption.copy(
                             color = Color.White,
-                            fontWeight = FontWeight.Medium
-                        ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
+                        )
                     )
                 }
             }
             ReaderState.LISTENING_NFC -> {
                 Row(
                     modifier = Modifier
-                        .height(34.dp)
+                        .height(36.dp)
                         .wrapContentWidth()
                         .clip(CircleShape)
                         .border(1.dp, ChildColors.BorderStrong, CircleShape)
@@ -1083,18 +1093,16 @@ fun TapCardBottomSheet(
                         text = "Listening for card",
                         style = typography.caption.copy(
                             color = Color.White,
-                            fontWeight = FontWeight.Medium
-                        ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
+                        )
                     )
                 }
             }
             ReaderState.NO_READER -> {
                 Box(
                     modifier = Modifier
-                        .height(34.dp)
+                        .height(36.dp)
                         .wrapContentWidth()
                         .clip(CircleShape)
                         .border(1.dp, ChildColors.Border, CircleShape)
@@ -1106,18 +1114,16 @@ fun TapCardBottomSheet(
                         text = "Connect the FOCAL reader",
                         style = typography.caption.copy(
                             color = ChildColors.Tertiary,
-                            fontWeight = FontWeight.Medium
-                        ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
+                        )
                     )
                 }
             }
             ReaderState.SUCCESS -> {
                 Box(
                     modifier = Modifier
-                        .height(34.dp)
+                        .height(36.dp)
                         .wrapContentWidth()
                         .clip(CircleShape)
                         .background(Color.White)
@@ -1128,18 +1134,16 @@ fun TapCardBottomSheet(
                         text = if (overlineText == "TEST CARD") "✓ Card works" else "✓ Card accepted",
                         style = typography.caption.copy(
                             color = Color.Black,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
                     )
                 }
             }
             ReaderState.WRONG_CARD -> {
                 Box(
                     modifier = Modifier
-                        .height(34.dp)
+                        .height(36.dp)
                         .wrapContentWidth()
                         .clip(CircleShape)
                         .border(1.dp, ChildColors.BorderStrong, CircleShape)
@@ -1151,23 +1155,23 @@ fun TapCardBottomSheet(
                         text = "This card isn't linked to you",
                         style = typography.caption.copy(
                             color = ChildColors.Secondary,
-                            fontWeight = FontWeight.Medium
-                        ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
+                        )
                     )
                 }
             }
         }
 
-        Spacer(Modifier.height(26.dp))
+        Spacer(Modifier.height(32.dp))
 
-        // SecondaryButton "Cancel"
+        // SecondaryButton "Cancel" pinned at bottom
         SecondaryButton(
             text = "Cancel",
             onClick = onDismiss,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
         )
         Spacer(Modifier.height(10.dp))
     }
@@ -1291,9 +1295,7 @@ fun EndFocusBottomSheet(
                             color = ChildColors.Secondary,
                             fontSize = 13.5.sp
                         ),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 2
                     )
                 }
             }

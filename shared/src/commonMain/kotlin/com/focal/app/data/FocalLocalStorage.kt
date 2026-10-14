@@ -43,6 +43,11 @@ object FocalLocalStorage {
         return inMemoryCache[key]?.toLongOrNull() ?: defaultValue
     }
 
+    fun remove(key: String) {
+        inMemoryCache.remove(key)
+        lastSavedTimestamp = currentTimeMillis()
+    }
+
     fun clear() {
         inMemoryCache.clear()
         lastSavedTimestamp = currentTimeMillis()
