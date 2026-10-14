@@ -1004,11 +1004,12 @@ fun AdminCardsTab(
                             CardStatus.IN_STOCK, CardStatus.UNPROGRAMMED -> "In Stock"
                             CardStatus.REGISTERED, CardStatus.PROGRAMMED -> "Registered"
                             CardStatus.ASSIGNED, CardStatus.ACTIVE -> "Assigned"
+                            CardStatus.DISABLED -> "Disabled"
                             CardStatus.REVOKED, CardStatus.BLOCKED, CardStatus.DEACTIVATED -> "Revoked"
                         },
                         badgeType = when (card.status) {
                             CardStatus.ASSIGNED, CardStatus.ACTIVE -> BadgeType.ACTIVE
-                            CardStatus.REVOKED, CardStatus.DEACTIVATED, CardStatus.BLOCKED -> BadgeType.EXPIRED
+                            CardStatus.REVOKED, CardStatus.DEACTIVATED, CardStatus.BLOCKED, CardStatus.DISABLED -> BadgeType.EXPIRED
                             else -> BadgeType.IDLE
                         }
                     )
@@ -1128,7 +1129,7 @@ fun AdminRevenueTab(repository: FocalRepository) {
                 StatCard(
                     label = "Paying Parents",
                     value = payingParents.toString(),
-                    deltaCaption = "₹299/mo subscribers"
+                    deltaCaption = "${com.focal.app.config.FocalPricingConfig.PLAN_PRICE_PER_MONTH} subscribers"
                 )
             }
         }

@@ -22,6 +22,9 @@ class FocusEngine private constructor() {
     var sessionState by mutableStateOf(SessionState.IDLE)
         private set
 
+    val isFocusActive: Boolean
+        get() = sessionState == SessionState.ACTIVE
+
     var currentSession by mutableStateOf<FocusSession?>(null)
         private set
 
@@ -93,6 +96,13 @@ class FocusEngine private constructor() {
                 val childName = currentSession?.childName ?: repository.currentUser.name
                 val missingStr = missingList.joinToString(", ")
 
+                com.focal.app.data.ActivityRepository.instance.recordEvent(
+                    type = com.focal.app.data.ActivityEventType.PROTECTION_OFF,
+                    childId = repository.currentUser.id,
+                    details = "Protection disabled: missing $missingStr",
+                    metadata = mapOf("missing" to missingStr)
+                )
+
                 val notifMessage = "Focus Protection Disabled — ${childName}'s device has disabled $missingStr. FOCAL restrictions may not be fully enforced."
 
                 repository.notifications.add(0, NotificationItem(
@@ -114,6 +124,13 @@ class FocusEngine private constructor() {
         } else {
             protectionStatusText = "Protection Active"
             if (!previousState) {
+                com.focal.app.data.ActivityRepository.instance.recordEvent(
+                    type = com.focal.app.data.ActivityEventType.PROTECTION_ON,
+                    childId = repository.currentUser.id,
+                    details = "All protection permissions active",
+                    metadata = emptyMap()
+                )
+
                 com.focal.app.data.FocalSyncEngine.instance.reportProtectionStatus(
                     childId = repository.currentUser.id,
                     protectionStatus = "Protection Active",
@@ -179,8 +196,8 @@ class FocusEngine private constructor() {
         policy: FocusPolicy,
         user: User = repository.currentUser
     ): Result<FocusSession> {
-        // Permission check
-        if (!checkAndUpdatePermissions()) {
+        // Permission check (local child protection check; bypassed for parent remote commands)
+        if (triggerType != TriggerType.REMOTE_PARENT && !checkAndUpdatePermissions()) {
             return Result.failure(Exception("Focus Protection Disabled: Required Accessibility or Overlay permission is missing."))
         }
 
@@ -253,20 +270,32 @@ class FocusEngine private constructor() {
             timestamp = "Just now"
         ))
 
+        // Log Activity Event
+        com.focal.app.data.ActivityRepository.instance.recordEvent(
+            type = com.focal.app.data.ActivityEventType.FOCUS_STARTED,
+            childId = user.id,
+            details = "${user.name} started '${policy.name}' (${policy.durationMinutes} min)",
+            metadata = mapOf("policy" to policy.name, "trigger" to triggerType.name)
+        )
+
         return Result.success(newSession)
     }
 
-    // Start focus via NFC card tap (Verifies card is paired to THIS child)
+    // Start focus via NFC card tap (Family-wide card applies this child's defaults)
     fun startFocusWithNfc(cardIdentifier: String, user: User = repository.currentUser): Result<FocusSession> {
         val cardValidation = repository.validateNfcCardForChildStart(cardIdentifier, user)
         if (cardValidation.isFailure) {
-            return Result.failure(cardValidation.exceptionOrNull() ?: Exception("This card isn't paired to you."))
+            return Result.failure(cardValidation.exceptionOrNull() ?: Exception("This isn't your family's FOCAL card."))
         }
-        val defaultPolicy = repository.policies.first()
+        val childProfile = repository.childrenList.find { it.userId == user.id || it.name.equals(user.name, ignoreCase = true) }
+        val policyId = childProfile?.defaultPolicyId ?: "pol_study"
+        val policy = repository.policies.find { it.id == policyId } ?: repository.policies.first()
+        val durationMins = childProfile?.defaultFocusMinutes ?: 90
+        val resolvedPolicy = policy.copy(durationMinutes = durationMins)
         return startFocus(
             triggerType = TriggerType.NFC,
             triggerIdentifier = cardIdentifier,
-            policy = defaultPolicy,
+            policy = resolvedPolicy,
             user = user
         )
     }
@@ -287,11 +316,11 @@ class FocusEngine private constructor() {
         )
     }
 
-    // End focus via NFC card tap (Verifies SAME paired card)
+    // End focus via NFC card tap (Family-wide card)
     fun endFocusWithNfc(cardIdentifier: String, user: User = repository.currentUser): Result<FocusSession> {
         val cardValidation = repository.validateNfcCardForChildEnd(cardIdentifier, user, currentSession)
         if (cardValidation.isFailure) {
-            return Result.failure(cardValidation.exceptionOrNull() ?: Exception("Only your paired card FC0001 can unlock this session."))
+            return Result.failure(cardValidation.exceptionOrNull() ?: Exception("This isn't your family's FOCAL card."))
         }
         return endFocus(
             triggerType = TriggerType.NFC,
@@ -326,17 +355,45 @@ class FocusEngine private constructor() {
 
     // Remote Stop Focus (Parent Controller Action)
     fun remoteStopFocus(childId: String): Result<FocusSession> {
-        val childIdx = repository.childrenList.indexOfFirst { it.id == childId }
+        val child = repository.childrenList.find { it.id == childId || it.userId == childId }
+        val childIdx = repository.childrenList.indexOfFirst { it.id == childId || it.userId == childId }
         if (childIdx >= 0) {
             repository.childrenList[childIdx] = repository.childrenList[childIdx].copy(
                 isFocusing = false,
                 remainingMinutes = 0
             )
         }
-        return endFocus(
-            triggerType = TriggerType.REMOTE_PARENT,
-            triggerIdentifier = "REMOTE_STOP_$childId"
+
+        com.focal.app.data.FocalSyncEngine.instance.reportChildTelemetry(
+            childId = child?.userId ?: childId,
+            isFocusActive = false,
+            remainingSeconds = 0L,
+            blockedAttempts = 0,
+            lastAttemptedApp = null
         )
+
+        // Only terminate local session if it actually belongs to this child
+        if (currentSession != null && (currentSession?.userId == childId || currentSession?.userId == child?.userId)) {
+            return endFocus(
+                triggerType = TriggerType.REMOTE_PARENT,
+                triggerIdentifier = "REMOTE_STOP_$childId"
+            )
+        }
+
+        val completed = FocusSession(
+            id = "sess_remote_$childId",
+            userId = child?.userId ?: childId,
+            childName = child?.name ?: "Child",
+            policyId = "pol_remote",
+            policyName = "Focus",
+            mode = FocusMode.STUDY,
+            triggerType = TriggerType.REMOTE_PARENT,
+            startTimeMillis = currentTimeMillis(),
+            targetDurationMinutes = 0,
+            remainingSeconds = 0,
+            status = SessionState.COMPLETED
+        )
+        return Result.success(completed)
     }
 
     // End focus via parent-approved emergency exit
@@ -359,6 +416,20 @@ class FocusEngine private constructor() {
         triggerIdentifier: String
     ): Result<FocusSession> {
         val session = currentSession ?: return Result.failure(Exception("No active focus session found."))
+
+        if (triggerType == TriggerType.QR) {
+            val trimmed = triggerIdentifier.trim()
+            if (trimmed.startsWith("focal://pair", ignoreCase = true)) {
+                return Result.failure(Exception("That's not a FOCAL focus QR"))
+            }
+            val childProfile = repository.childrenList.find { it.userId == session.userId || it.name.equals(session.userId, ignoreCase = true) }
+            val userFamily = childProfile?.familyId ?: "family_1"
+            val isFamilyValid = com.focal.app.data.FocusQrRepository.instance.validateFamilyQr(trimmed, userFamily)
+            val isSingleUse = repository.qrTokens.any { it.token == trimmed }
+            if (!isFamilyValid && !isSingleUse && !trimmed.startsWith("FOCAL_")) {
+                return Result.failure(Exception("That's not a FOCAL focus QR"))
+            }
+        }
 
         sessionState = SessionState.ENDING
         timerJob?.cancel()
@@ -405,6 +476,14 @@ class FocusEngine private constructor() {
             timestamp = "Just now"
         ))
 
+        // Log Activity Event
+        com.focal.app.data.ActivityRepository.instance.recordEvent(
+            type = com.focal.app.data.ActivityEventType.FOCUS_ENDED,
+            childId = session.userId,
+            details = "${session.childName} finished '${session.policyName}'. Focus Score: $score.",
+            metadata = mapOf("policy" to session.policyName, "score" to score.toString())
+        )
+
         return Result.success(completedSession)
     }
 
@@ -419,6 +498,15 @@ class FocusEngine private constructor() {
         )
         currentSession = null
         sessionState = SessionState.COMPLETED
+
+        // Log Activity Event
+        com.focal.app.data.ActivityRepository.instance.recordEvent(
+            type = com.focal.app.data.ActivityEventType.FOCUS_COMPLETED,
+            childId = session.userId,
+            details = "${session.childName} completed '${session.policyName}' (${session.targetDurationMinutes} min)",
+            metadata = mapOf("policy" to session.policyName, "duration" to session.targetDurationMinutes.toString())
+        )
+
         com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
             active = false,
             endsAtElapsed = 0L,
@@ -432,6 +520,13 @@ class FocusEngine private constructor() {
             blockedAttemptsCount++
             distractionsPrevented++
             blockedAppOverlayName = appName
+
+            com.focal.app.data.ActivityRepository.instance.recordEvent(
+                type = com.focal.app.data.ActivityEventType.APP_BLOCKED,
+                childId = currentSession?.userId ?: "child_1",
+                details = "Blocked $appName attempt during Focus",
+                metadata = mapOf("app" to appName)
+            )
 
             // Stream distraction event to Controller dashboard in real-time
             com.focal.app.data.FocalSyncEngine.instance.reportChildTelemetry(

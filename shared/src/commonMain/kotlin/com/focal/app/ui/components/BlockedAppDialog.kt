@@ -1,5 +1,6 @@
 package com.focal.app.ui.components
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,9 +12,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -22,10 +27,211 @@ import com.focal.app.data.FocalRepository
 import com.focal.app.engine.FocusEngine
 import com.focal.app.model.EmergencyExitRequest
 import com.focal.app.theme.FocalColors
+import com.focal.app.ui.child.ParentUnlockScreen
+import com.focal.app.ui.child.components.GlassCard
+import com.focal.app.ui.child.components.PrimaryButton as ChildPrimaryButton
+import com.focal.app.ui.child.components.SecondaryButton as ChildSecondaryButton
+import com.focal.app.ui.theme.ChildColors
+import com.focal.app.ui.theme.ChildRadius
+import com.focal.app.ui.theme.LocalChildTypography
+
+/**
+ * Common Block Screen Content matching Image 2 (P2_2_block_screen.png)
+ */
+@Composable
+fun ChildBlockScreenContent(
+    title: String,
+    subtitle: String,
+    icon: ImageVector = FocalIcons.Globe,
+    isFocusActive: Boolean = true,
+    blockedAttemptsCount: Int = 0,
+    onBackToFocus: () -> Unit,
+    onSecondaryAction: (() -> Unit)? = null,
+    secondaryActionText: String = "Parent unlock"
+) {
+    val typography = LocalChildTypography.current
+    val quotes = listOf(
+        "Small focus now, big wins later.",
+        "Stay in the zone. You've got this.",
+        "One task at a time.",
+        "Distractions are temporary. Focus is forever.",
+        "Great things take uninterrupted time."
+    )
+    val quote = remember { quotes.first() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ChildColors.Background)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 20.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Spacer(Modifier.height(40.dp))
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // 180dp illustration frame: radial glow + 180dp thin ring + 104dp tile + 34dp lock badge
+                Box(
+                    modifier = Modifier.size(180.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val c = Offset(size.width / 2f, size.height / 2f)
+                        val r = (size.width - 2.dp.toPx()) / 2f
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(Color.White.copy(alpha = 0.16f), Color.Transparent),
+                                center = c,
+                                radius = r
+                            ),
+                            center = c,
+                            radius = r
+                        )
+                        drawCircle(
+                            color = Color.White.copy(alpha = 0.12f),
+                            center = c,
+                            radius = r,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(1.5.dp.toPx())
+                        )
+                    }
+
+                    // 104dp rounded-square tile (radius 30, #0E0E0E, 1dp #2A2A2A border)
+                    Box(
+                        modifier = Modifier
+                            .size(104.dp)
+                            .clip(RoundedCornerShape(30.dp))
+                            .background(ChildColors.BannerBg)
+                            .border(1.dp, ChildColors.BorderStrong, RoundedCornerShape(30.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(52.dp)
+                        )
+
+                        // 34dp white lock badge bottom-right (3dp black border, black lock glyph)
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color.White)
+                                .border(3.dp, Color.Black, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = FocalIcons.Lock,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(28.dp))
+
+                // Title (30sp bold, one line, ellipsize if long)
+                Text(
+                    text = title,
+                    style = typography.display.copy(
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    ),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                // Subtitle: "{policy} · {min} min left" or "Protected by FOCAL · ask a parent"
+                Text(
+                    text = subtitle,
+                    style = typography.body.copy(
+                        fontSize = 15.sp,
+                        color = ChildColors.Secondary
+                    ),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(Modifier.height(36.dp))
+
+                // GlassCard: motivational line + "Blocked {n} times this session"
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    radius = ChildRadius.SmallCard,
+                    padding = 18.dp
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = quote,
+                            style = typography.headline.copy(
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            ),
+                            textAlign = TextAlign.Center
+                        )
+                        if (isFocusActive) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "Blocked $blockedAttemptsCount times this session",
+                                style = typography.caption.copy(
+                                    fontSize = 13.sp,
+                                    color = ChildColors.Secondary
+                                ),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+            ) {
+                if (onSecondaryAction != null) {
+                    ChildSecondaryButton(
+                        text = secondaryActionText,
+                        onClick = onSecondaryAction,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                ChildPrimaryButton(
+                    text = if (isFocusActive) "Back to focus" else "Go back",
+                    onClick = onBackToFocus,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
 
 /**
  * Restricted App Overlay displayed when a blocked application is launched during an active focus session.
- * Redesigned to strict minimal monochrome specifications.
  */
 @Composable
 fun BlockedAppOverlay(
@@ -35,107 +241,38 @@ fun BlockedAppOverlay(
     repository: FocalRepository = FocalRepository.instance
 ) {
     var showEmergencyModal by remember { mutableStateOf(false) }
+    var showParentUnlockModal by remember { mutableStateOf(false) }
+
     val currentSession = focusEngine.currentSession
     val policyTitle = currentSession?.policyName ?: "Study Mode"
-    val remainingTimeStr = focusEngine.formatRemainingTime()
+    val remainingMinutes = (focusEngine.remainingSeconds / 60).coerceAtLeast(1)
+    val isFocusActive = focusEngine.isFocusActive
+    val subtitleText = if (isFocusActive) "$policyTitle · $remainingMinutes min left" else "Protected by FOCAL · ask a parent"
 
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .windowInsetsPadding(WindowInsets.systemBars)
-                .padding(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                // App Logo
-                Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(CircleShape)
-                        .background(FocalColors.Surface)
-                        .border(1.dp, FocalColors.Border, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    FocalAppLogo(
-                        modifier = Modifier.size(44.dp),
-                        shape = RoundedCornerShape(10.dp)
-                    )
-                }
+        ChildBlockScreenContent(
+            title = "$appName is blocked",
+            subtitle = subtitleText,
+            icon = FocalIcons.Smartphone,
+            isFocusActive = isFocusActive,
+            blockedAttemptsCount = focusEngine.blockedAttemptsCount,
+            onBackToFocus = onDismiss,
+            onSecondaryAction = { showParentUnlockModal = true },
+            secondaryActionText = "Parent unlock"
+        )
 
-                Spacer(modifier = Modifier.height(28.dp))
-
-                // Status Dot Pill
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(FocalColors.Surface)
-                        .border(1.dp, FocalColors.Border, RoundedCornerShape(20.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    StatusDot(active = true)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "FOCUS ACTIVE",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            letterSpacing = 1.sp
-                        )
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // "[AppName] is blocked"
-                Text(
-                    text = "$appName is blocked",
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    ),
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // "[PolicyName] · [Time Left] left"
-                Text(
-                    text = "$policyTitle · $remainingTimeStr left",
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        color = FocalColors.TextSecondary
-                    ),
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(40.dp))
-
-                // Button: "Back to focus"
-                PrimaryButton(
-                    text = "Back to focus",
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                SecondaryButton(
-                    text = "Request emergency exit",
-                    onClick = { showEmergencyModal = true },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+        if (showParentUnlockModal) {
+            ParentUnlockScreen(
+                onClose = { showParentUnlockModal = false },
+                onUnlockSuccess = {
+                    showParentUnlockModal = false
+                    onDismiss()
+                },
+                repository = repository
+            )
         }
 
         if (showEmergencyModal) {
@@ -167,102 +304,38 @@ fun BlockedWebsiteOverlay(
     repository: FocalRepository = FocalRepository.instance
 ) {
     var showEmergencyModal by remember { mutableStateOf(false) }
+    var showParentUnlockModal by remember { mutableStateOf(false) }
+
     val currentSession = focusEngine.currentSession
     val policyTitle = currentSession?.policyName ?: "Study Mode"
-    val remainingTimeStr = focusEngine.formatRemainingTime()
+    val remainingMinutes = (focusEngine.remainingSeconds / 60).coerceAtLeast(1)
+    val isFocusActive = focusEngine.isFocusActive
+    val subtitleText = if (isFocusActive) "$policyTitle · $remainingMinutes min left" else "Protected by FOCAL · ask a parent"
 
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .padding(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                // App Logo
-                Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(CircleShape)
-                        .background(FocalColors.Surface)
-                        .border(1.dp, FocalColors.Border, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    FocalAppLogo(
-                        modifier = Modifier.size(44.dp),
-                        shape = RoundedCornerShape(10.dp)
-                    )
-                }
+        ChildBlockScreenContent(
+            title = "${domainName.ifEmpty { "Website" }} is blocked",
+            subtitle = subtitleText,
+            icon = FocalIcons.Globe,
+            isFocusActive = isFocusActive,
+            blockedAttemptsCount = focusEngine.blockedAttemptsCount,
+            onBackToFocus = onDismiss,
+            onSecondaryAction = { showParentUnlockModal = true },
+            secondaryActionText = "Parent unlock"
+        )
 
-                Spacer(modifier = Modifier.height(28.dp))
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(FocalColors.Surface)
-                        .border(1.dp, FocalColors.Border, RoundedCornerShape(20.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    StatusDot(active = true)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "WEBSITE RESTRICTED",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            letterSpacing = 1.sp
-                        )
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Text(
-                    text = "${domainName.ifEmpty { "Website" }} is blocked",
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    ),
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "$policyTitle · $remainingTimeStr left",
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        color = FocalColors.TextSecondary
-                    ),
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(40.dp))
-
-                PrimaryButton(
-                    text = "Back to focus",
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                SecondaryButton(
-                    text = "Request emergency exit",
-                    onClick = { showEmergencyModal = true },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+        if (showParentUnlockModal) {
+            ParentUnlockScreen(
+                onClose = { showParentUnlockModal = false },
+                onUnlockSuccess = {
+                    showParentUnlockModal = false
+                    onDismiss()
+                },
+                repository = repository
+            )
         }
 
         if (showEmergencyModal) {
@@ -494,14 +567,14 @@ fun EmergencyExitModal(
                                 modifier = Modifier
                                     .size(56.dp)
                                     .clip(CircleShape)
-                                    .background(FocalColors.Surface)
-                                    .border(1.dp, FocalColors.Danger, CircleShape),
+                                    .background(ChildColors.IconCircleBg)
+                                    .border(1.dp, ChildColors.BorderStrong, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = FocalIcons.Close,
                                     contentDescription = null,
-                                    tint = FocalColors.Danger,
+                                    tint = Color.White,
                                     modifier = Modifier.size(28.dp)
                                 )
                             }
@@ -529,120 +602,6 @@ fun EmergencyExitModal(
                             )
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Protection Disabled Modal displayed when critical accessibility/overlay permissions are lost.
- */
-@Composable
-fun ProtectionDisabledModal(
-    focusEngine: FocusEngine = FocusEngine.instance,
-    onDismiss: () -> Unit
-) {
-    LaunchedEffect(Unit) {
-        while (true) {
-            kotlinx.coroutines.delay(1000)
-            focusEngine.checkAndUpdatePermissions()
-        }
-    }
-
-    val missingAccess = !focusEngine.isAccessibilityGranted
-    val missingOverlay = !focusEngine.isOverlayGranted
-
-    val messageText = when {
-        missingAccess && missingOverlay ->
-            "Accessibility and Overlay permissions are required to enforce focus rules."
-        missingAccess ->
-            "Accessibility Service is required to detect restricted app launches."
-        missingOverlay ->
-            "Display Over Other Apps permission is required to show the Focus Shield."
-        else ->
-            "Required focus protection permissions are disabled."
-    }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.9f))
-                .padding(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            FocalCard(
-                modifier = Modifier
-                    .fillMaxWidth(0.92f)
-                    .padding(vertical = 12.dp)
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(CircleShape)
-                            .background(FocalColors.Surface)
-                            .border(1.dp, FocalColors.Danger, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = FocalIcons.Warning,
-                            contentDescription = null,
-                            tint = FocalColors.Danger,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "Protection is off — fix now",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        ),
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = messageText,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            color = FocalColors.TextSecondary,
-                            lineHeight = 20.sp
-                        ),
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    PrimaryButton(
-                        text = "Fix Permissions",
-                        onClick = {
-                            if (missingAccess) {
-                                PlatformPermissionsHelper.openAccessibilitySettings()
-                            } else {
-                                PlatformPermissionsHelper.openOverlaySettings()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    SecondaryButton(
-                        text = "Re-check status",
-                        onClick = { focusEngine.checkAndUpdatePermissions() },
-                        modifier = Modifier.fillMaxWidth()
-                    )
                 }
             }
         }

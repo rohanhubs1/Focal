@@ -24,6 +24,8 @@ dependencies {
     implementation(libs.camera.lifecycle)
     implementation(libs.camera.view)
     implementation(libs.mlkit.barcode.scanning)
+    // BouncyCastle for NXP secp128r1 curve originality verification
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
 }
 
 android {

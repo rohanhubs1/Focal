@@ -26,8 +26,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.focal.app.theme.FocalColors
 import focal.shared.generated.resources.Res
-import focal.shared.generated.resources.focal_logo_hero
-import focal.shared.generated.resources.focal_nfc_card_hero
 import org.jetbrains.compose.resources.painterResource
 
 // -------------------------------------------------------------

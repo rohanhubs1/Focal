@@ -1,8 +1,180 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { readFileSync } from "fs";
+import { join } from "path";
+import * as logic from "./nfcguard/cardLogic";
+import { Caller, CardRecord, CardStore, Keys, OrderRecord, TapInput, TapLog } from "./nfcguard/cardLogic";
+import { loadPublicKeyPem } from "./nfcguard/cardCrypto";
 
 admin.initializeApp();
 const db = admin.firestore();
+
+// ---------------------------------------------------------
+// NFC Guard Cryptographic Engine (5-Check Security Gate)
+// ---------------------------------------------------------
+
+const keys: Keys = {
+  ourPublicKey: loadPublicKeyPem(readFileSync(join(__dirname, "..", "keys", "public_key.pem"), "utf8")),
+};
+const requireGenuine = process.env.NFCGUARD_ALLOW_NON_NXP !== "true";
+const ACTIVE_SUBSCRIPTION = ["trial", "active"];
+
+/** CardStore over one Firestore transaction: reads go through it, writes are queued and applied last. */
+class TxStore implements CardStore {
+  private writes: Array<() => void> = [];
+  constructor(private tx: FirebaseFirestore.Transaction) {}
+
+  async getCard(serial: number) {
+    const s = await this.tx.get(db.collection("cards").doc(String(serial)));
+    return s.exists ? (s.data() as CardRecord) : null;
+  }
+  async getOrder(orderId: string) {
+    const s = await this.tx.get(db.collection("cardOrders").doc(orderId));
+    return s.exists ? (s.data() as OrderRecord) : null;
+  }
+  async parentExists(parentId: string) {
+    return (await this.tx.get(db.collection("parents").doc(parentId))).exists;
+  }
+  async subscriptionActive(parentId: string) {
+    const s = await this.tx.get(db.collection("parents").doc(parentId));
+    return s.exists && ACTIVE_SUBSCRIPTION.includes(s.get("subscriptionStatus"));
+  }
+  async putCard(card: CardRecord) {
+    this.writes.push(() => this.tx.set(db.collection("cards").doc(String(card.serial)), card));
+  }
+  async putOrder(order: OrderRecord) {
+    this.writes.push(() => this.tx.set(db.collection("cardOrders").doc(order.orderId), order));
+  }
+  async logTap(entry: TapLog) {
+    this.writes.push(() => this.tx.set(db.collection("cardTaps").doc(),
+      { ...entry, at: admin.firestore.FieldValue.serverTimestamp() }));
+  }
+  flush() { this.writes.forEach((w) => w()); }
+}
+
+function inTx<T>(fn: (store: TxStore) => Promise<T>): Promise<T> {
+  return db.runTransaction(async (tx) => {
+    const store = new TxStore(tx);
+    const result = await fn(store);
+    store.flush();
+    return result;
+  });
+}
+
+/** Verified caller from Firebase Auth claims */
+function callerOf(context: functions.https.CallableContext): Caller {
+  const t = context.auth?.token;
+  if (!context.auth || !t) throw new functions.https.HttpsError("unauthenticated", "Sign in first.");
+  const role = t.role;
+  if (role !== "parent" && role !== "child" && role !== "admin") {
+    throw new functions.https.HttpsError("permission-denied", "Unknown role.");
+  }
+  return {
+    uid: context.auth.uid,
+    role,
+    parentId: role === "parent" ? context.auth.uid : (t.parentId ?? null),
+    childId: role === "child" ? (t.childId ?? null) : null,
+  };
+}
+
+function need<T>(ok: boolean, value: T, msg: string): T {
+  if (!ok) throw new functions.https.HttpsError("invalid-argument", msg);
+  return value;
+}
+
+function tapInput(data: any): TapInput {
+  return {
+    uid: need(typeof data?.uid === "string" && /^[0-9a-fA-F]{14}$/.test(data.uid), data?.uid, "uid: 14 hex chars"),
+    payload: need(typeof data?.payload === "string", data?.payload, "payload: base64"),
+    nxpSignature: need(typeof data?.nxpSignature === "string", data?.nxpSignature, "nxpSignature: base64"),
+    counter: need(Number.isInteger(data?.counter), data?.counter, "counter: integer"),
+  };
+}
+
+/** Child phone, every tap: checks 1-5. Family = the child's parentId from its login token. */
+export const verifyCard = functions.https.onCall(async (data, context) => {
+  const caller = callerOf(context);
+  const input = tapInput(data);
+  return inTx((store) => logic.verifyCard(store, input, caller, keys, requireGenuine));
+});
+
+/** Parent: serial (printed on the card) + activation code (order e-mail) + tap. */
+export const registerCard = functions.https.onCall(async (data, context) => {
+  const caller = callerOf(context);
+  if (caller.role !== "parent") throw new functions.https.HttpsError("permission-denied", "Parent only.");
+  const input = tapInput(data);
+  const serial = need(Number.isInteger(data?.serial), data?.serial as number, "serial: integer");
+  const code = need(typeof data?.code === "string", data?.code as string, "code: string");
+  const local = logic.localChecks(input, keys, requireGenuine);
+  if (!local.passed || local.payload?.serial !== serial) {
+    return { ok: false, reason: local.checks.find((c) => !c.passed)?.detail ?? "card does not carry this serial" };
+  }
+  const [ok, reason] = await inTx((store) => logic.registerCard(store, serial, code, caller.uid, input.uid, input.counter));
+  return { ok, reason };
+});
+
+/** Parent: limit a card to one child (or null for any child of the family). */
+export const assignCardToChild = functions.https.onCall(async (data, context) => {
+  const caller = callerOf(context);
+  const serial = need(Number.isInteger(data?.serial), data?.serial as number, "serial: integer");
+  const childId = data?.childId ?? null;
+  if (childId !== null) {
+    const child = await db.collection("children").doc(String(childId)).get();
+    if (!child.exists || child.get("parentId") !== caller.uid) {
+      throw new functions.https.HttpsError("permission-denied", "Not your child.");
+    }
+  }
+  const [ok, reason] = await inTx((store) => logic.assignCard(store, serial, childId, caller));
+  return { ok, reason };
+});
+
+/** Parent (own card) or admin: disable a lost card. */
+export const revokeCard = functions.https.onCall(async (data, context) => {
+  const caller = callerOf(context);
+  const serial = need(Number.isInteger(data?.serial), data?.serial as number, "serial: integer");
+  const [ok, reason] = await inTx((store) => logic.revokeCard(store, serial, caller));
+  if (!ok) throw new functions.https.HttpsError("permission-denied", reason);
+  return { ok, reason };
+});
+
+/** Admin: sell cards. Returns the activation code for the order e-mail. */
+export const createOrder = functions.https.onCall(async (data, context) => {
+  const caller = callerOf(context);
+  const serials = need(Array.isArray(data?.serials) && data.serials.every(Number.isInteger),
+    data?.serials as number[], "serials: integer array");
+  try {
+    return await inTx((store) => logic.createOrder(store, serials, caller, data?.parentId ?? null));
+  } catch (e) {
+    throw new functions.https.HttpsError("failed-precondition", (e as Error).message);
+  }
+});
+
+/** Admin / factory station: record a provisioned card as unassigned. */
+export const addInventoryCard = functions.https.onCall(async (data, context) => {
+  const caller = callerOf(context);
+  const serial = need(Number.isInteger(data?.serial), data?.serial as number, "serial: integer");
+  const uid = need(typeof data?.uid === "string" && /^[0-9a-fA-F]{14}$/.test(data.uid), data?.uid as string, "uid");
+  const batch = need(Number.isInteger(data?.batch), data?.batch as number, "batch: integer");
+  const [ok, reason] = await inTx((store) => logic.addInventoryCard(store, serial, uid, batch, caller));
+  if (!ok) throw new functions.https.HttpsError("failed-precondition", reason);
+  return { ok, reason };
+});
+
+// Legacy aliases for backward compatibility
+export const claimCard = functions.https.onCall(async (data, context) => {
+  return registerCard(data, context);
+});
+
+export const programCards = functions.https.onCall(async (data, context) => {
+  if (!context.auth || context.auth.token.role !== "admin") {
+    throw new functions.https.HttpsError("permission-denied", "Admin role required.");
+  }
+  return { success: true, message: "Cards are factory-provisioned via station.py." };
+});
+
+// ---------------------------------------------------------
+// Device Pairing & Session Management
+// ---------------------------------------------------------
 
 /**
  * 1. createPairingCode — Generates a 6-digit numeric pairing code + QR payload.
@@ -95,85 +267,7 @@ export const redeemPairingCode = functions.https.onCall(async (data) => {
 });
 
 /**
- * 3. claimCard — Registers an NFC card to a parent account.
- */
-export const claimCard = functions.https.onCall(async (data, context) => {
-  if (!context.auth || context.auth.token.role !== "parent") {
-    throw new functions.https.HttpsError("unauthenticated", "Parent role required.");
-  }
-  const { rawNfcToken, childId } = data;
-  const parentId = context.auth.uid;
-
-  const cardQuery = await db.collection("cards").where("token", "==", rawNfcToken).limit(1).get();
-  if (cardQuery.empty) {
-    throw new functions.https.HttpsError("not-found", "Card token not found in system inventory.");
-  }
-
-  const cardDoc = cardQuery.docs[0];
-  const cardData = cardDoc.data();
-
-  if (cardData.status === "deactivated") {
-    throw new functions.https.HttpsError("failed-precondition", "This card has been deactivated.");
-  }
-
-  await cardDoc.ref.update({
-    ownerParentId: parentId,
-    assignedChildId: childId || null,
-    status: childId ? "assigned" : "registered",
-    registeredAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  return { success: true, cardId: cardDoc.id, message: "Card successfully claimed." };
-});
-
-/**
- * 4. revokeCard — Revokes an NFC card.
- */
-export const revokeCard = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Authentication required.");
-  }
-  const { cardId } = data;
-  const cardRef = db.collection("cards").doc(cardId);
-  await cardRef.update({
-    status: "deactivated",
-    ownerParentId: null,
-    assignedChildId: null,
-  });
-  return { success: true, message: "Card deactivated." };
-});
-
-/**
- * 5. programCards — Admin batch card generation.
- */
-export const programCards = functions.https.onCall(async (data, context) => {
-  if (!context.auth || context.auth.token.role !== "admin") {
-    throw new functions.https.HttpsError("permission-denied", "Admin role required.");
-  }
-  const { count } = data;
-  const generated: any[] = [];
-  const batch = db.batch();
-
-  for (let i = 0; i < (count || 10); i++) {
-    const cardId = `FC${Math.floor(1000 + Math.random() * 9000)}`;
-    const cardRef = db.collection("cards").doc(cardId);
-    const token = `TK_${Math.floor(100000 + Math.random() * 900000)}`;
-    const cardData = {
-      cardId,
-      token,
-      status: "in_stock",
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    };
-    batch.set(cardRef, cardData);
-    generated.push(cardData);
-  }
-
-  await batch.commit();
-  return { success: true, generatedCards: generated };
-});
-
-/**
- * 6. createFocusQr — Generates ephemeral focus session QR code.
+ * 3. createFocusQr — Generates ephemeral focus session QR code.
  */
 export const createFocusQr = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Authentication required.");
@@ -194,7 +288,7 @@ export const createFocusQr = functions.https.onCall(async (data, context) => {
 });
 
 /**
- * 7. validateFocusQr — Validates ephemeral focus session QR code.
+ * 4. validateFocusQr — Validates ephemeral focus session QR code.
  */
 export const validateFocusQr = functions.https.onCall(async (data) => {
   const { qrToken } = data;
@@ -206,13 +300,18 @@ export const validateFocusQr = functions.https.onCall(async (data) => {
 });
 
 /**
- * 8. startRemoteSession — Remote start focus session on child device.
+ * 5. startRemoteSession — Remote start focus session on child device with family check.
  */
 export const startRemoteSession = functions.https.onCall(async (data, context) => {
   if (!context.auth || context.auth.token.role !== "parent") {
     throw new functions.https.HttpsError("unauthenticated", "Parent role required.");
   }
   const { childId, policyId, durationMinutes } = data;
+  const childDoc = await db.collection("children").doc(childId).get();
+  if (!childDoc.exists || childDoc.data()?.parentId !== context.auth.uid) {
+    throw new functions.https.HttpsError("permission-denied", "Child does not belong to your family.");
+  }
+
   const sessionRef = db.collection("sessions").doc();
   await sessionRef.set({
     childId,
@@ -227,14 +326,19 @@ export const startRemoteSession = functions.https.onCall(async (data, context) =
 });
 
 /**
- * 9. endRemoteSession — Remote end focus session.
+ * 6. endRemoteSession — Remote end focus session with family ownership check.
  */
 export const endRemoteSession = functions.https.onCall(async (data, context) => {
   if (!context.auth || context.auth.token.role !== "parent") {
     throw new functions.https.HttpsError("unauthenticated", "Parent role required.");
   }
   const { sessionId } = data;
-  await db.collection("sessions").doc(sessionId).update({
+  const sessionDoc = await db.collection("sessions").doc(sessionId).get();
+  if (!sessionDoc.exists || sessionDoc.data()?.parentId !== context.auth.uid) {
+    throw new functions.https.HttpsError("permission-denied", "Session does not belong to your family.");
+  }
+
+  await sessionDoc.ref.update({
     status: "ENDED_EARLY_PARENT",
     actualEndTime: admin.firestore.FieldValue.serverTimestamp(),
   });
@@ -242,7 +346,7 @@ export const endRemoteSession = functions.https.onCall(async (data, context) => 
 });
 
 /**
- * 10. handleEmergencyRequest — Emergency exit request processing.
+ * 7. handleEmergencyRequest — Emergency exit request processing (child cannot approve).
  */
 export const handleEmergencyRequest = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Auth required.");
@@ -256,7 +360,14 @@ export const handleEmergencyRequest = functions.https.onCall(async (data, contex
     });
     return { status: "PENDING_PARENT_APPROVAL" };
   } else if (action === "APPROVE") {
-    await db.collection("sessions").doc(sessionId).update({
+    if (context.auth.token.role !== "parent") {
+      throw new functions.https.HttpsError("permission-denied", "Child cannot approve emergency exit.");
+    }
+    const sessionDoc = await db.collection("sessions").doc(sessionId).get();
+    if (!sessionDoc.exists || sessionDoc.data()?.parentId !== context.auth.uid) {
+      throw new functions.https.HttpsError("permission-denied", "Session does not belong to your family.");
+    }
+    await sessionDoc.ref.update({
       status: "ENDED_EARLY_EMERGENCY",
       actualEndTime: admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -266,7 +377,7 @@ export const handleEmergencyRequest = functions.https.onCall(async (data, contex
 });
 
 /**
- * 11. heartbeatWatcher — Scheduled function running every 15 min for offline detection.
+ * 8. heartbeatWatcher — Scheduled function running every 15 min for offline detection.
  */
 export const heartbeatWatcher = functions.pubsub.schedule("every 15 minutes").onRun(async () => {
   const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
@@ -286,7 +397,7 @@ export const heartbeatWatcher = functions.pubsub.schedule("every 15 minutes").on
 });
 
 /**
- * 12. adminStats — Aggregates admin telemetry numbers.
+ * 9. adminStats — Aggregates admin telemetry numbers.
  */
 export const adminStats = functions.https.onCall(async (data, context) => {
   if (!context.auth || context.auth.token.role !== "admin") {
@@ -307,9 +418,8 @@ export const adminStats = functions.https.onCall(async (data, context) => {
 });
 
 /**
- * 13. subscriptionWebhooks — Razorpay Payment Gateway Webhook handler.
+ * 10. subscriptionWebhooks — Razorpay Payment Gateway Webhook handler.
  */
 export const subscriptionWebhooks = functions.https.onRequest(async (req, res) => {
-  // Webhook payload validation & processing placeholder
   res.status(200).send({ status: "ok" });
 });

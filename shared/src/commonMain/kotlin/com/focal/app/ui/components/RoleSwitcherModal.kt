@@ -27,6 +27,7 @@ import com.focal.app.theme.FocalColors
 fun RoleSwitcherModal(
     onDismiss: () -> Unit,
     onRoleSelected: (UserRole) -> Unit,
+    onOpenComponentGallery: (() -> Unit)? = null,
     repository: FocalRepository = FocalRepository.instance,
     focusEngine: FocusEngine = FocusEngine.instance
 ) {
@@ -120,11 +121,60 @@ fun RoleSwitcherModal(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
+                if (onOpenComponentGallery != null) {
+                    PrimaryButton(
+                        text = "Component Gallery (Step 0)",
+                        onClick = {
+                            onOpenComponentGallery()
+                            onDismiss()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SecondaryButton(
+                        text = if (focusEngine.sessionState == SessionState.ACTIVE) "Stop Focus" else "Start Focus (Active)",
+                        onClick = {
+                            if (focusEngine.sessionState == SessionState.ACTIVE) {
+                                focusEngine.endFocus(com.focal.app.model.TriggerType.NFC, "FC0001")
+                            } else {
+                                focusEngine.startFocusWithNfc("FC0001")
+                            }
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    SecondaryButton(
+                        text = if (!focusEngine.isProtectionActive) "Enable Prot." else "Disable Prot.",
+                        onClick = {
+                            if (focusEngine.isProtectionActive) {
+                                focusEngine.isProtectionActive = false
+                                focusEngine.missingPermissionsList = listOf("Accessibility")
+                            } else {
+                                focusEngine.isProtectionActive = true
+                                focusEngine.missingPermissionsList = emptyList()
+                            }
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
                 SecondaryButton(
                     text = "Reset Test Data",
                     onClick = {
                         repository.isProtectionDisabledOnChild = false
                         repository.protectionDisabledReason = ""
+                        focusEngine.isProtectionActive = true
+                        focusEngine.missingPermissionsList = emptyList()
                         onDismiss()
                     },
                     modifier = Modifier.fillMaxWidth()

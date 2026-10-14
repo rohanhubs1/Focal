@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.focal.app.config.FocalPricingConfig
 import com.focal.app.model.PlanType
 import com.focal.app.theme.FocalColors
 
@@ -159,7 +160,7 @@ fun PaymentDialog(
                         ) {
                             Text("Initial Cost", color = FocalColors.TextSecondary)
                             Text(
-                                text = if (planType == PlanType.NFC) "₹999 (Card Price)" else "₹0 (FREE)",
+                                text = if (planType == PlanType.NFC) "${FocalPricingConfig.NFC_CARD_PRICE_FORMATTED} (Card Price)" else "₹0 (FREE)",
                                 fontWeight = FontWeight.Bold,
                                 color = if (planType == PlanType.NFC) Color.White else FocalColors.Success
                             )
@@ -170,7 +171,7 @@ fun PaymentDialog(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("Free Trial", color = FocalColors.TextSecondary)
-                            Text("3 MONTHS FREE", color = FocalColors.PrimaryAccentLight, fontWeight = FontWeight.Bold)
+                            Text("${FocalPricingConfig.PLAN_FREE_TRIAL_MONTHS} MONTHS FREE", color = FocalColors.PrimaryAccentLight, fontWeight = FontWeight.Bold)
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(
@@ -178,7 +179,7 @@ fun PaymentDialog(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("Post Trial Billing", color = FocalColors.TextSecondary)
-                            Text("₹299 / month", color = FocalColors.TextSecondary)
+                            Text(FocalPricingConfig.PLAN_PRICE_PER_MONTH, color = FocalColors.TextSecondary)
                         }
                     }
 

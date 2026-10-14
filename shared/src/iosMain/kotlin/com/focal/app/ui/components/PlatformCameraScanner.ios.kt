@@ -14,6 +14,7 @@ import com.focal.app.theme.FocalColors
 @Composable
 actual fun PlatformCameraScanner(
     modifier: Modifier,
+    torchEnabled: Boolean,
     onQrDetected: (String) -> Unit
 ) {
     Box(

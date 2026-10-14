@@ -55,7 +55,8 @@ enum class CardStatus {
     PROGRAMMED,
     ACTIVE,
     BLOCKED,
-    DEACTIVATED
+    DEACTIVATED,
+    DISABLED
 }
 
 enum class TriggerType {
@@ -73,6 +74,7 @@ data class User(
     val email: String,
     val phone: String = "",
     val role: UserRole,
+    val familyId: String = "family_1",
     val planType: PlanType = PlanType.NFC,
     val subscriptionStatus: SubscriptionStatus = SubscriptionStatus.TRIAL,
     val trialDaysRemaining: Int = 84, // 3 months free trial
@@ -88,10 +90,15 @@ data class ChildProfile(
     val userId: String,
     val controllerId: String,
     val name: String,
+    val familyId: String = "family_1",
+    val defaultPolicyId: String = "policy_study",
+    val defaultFocusMinutes: Int = 90,
     val age: Int = 14,
+    val grade: String = "",
     val avatar: String = "",
     val isOnline: Boolean = true,
     val isFocusing: Boolean = false,
+    val isProtectionOff: Boolean = false,
     val todayFocusMinutes: Int = 155, // 02h 35m
     val screenTimeMinutes: Int = 192, // 03h 12m
     val focusScore: Int = 82,
@@ -102,14 +109,24 @@ data class ChildProfile(
     val pairedCardId: String? = "FC0001",
     val deviceName: String = "Rahul's Galaxy Tab S9",
     val cardCustodyMode: String = "Card stays with child" // "Card stays with child" (default) or "I keep the card"
-)
+) {
+    val displayGrade: String
+        get() = when {
+            grade.isNotBlank() -> grade
+            name.equals("Aarav", ignoreCase = true) -> "Class 10"
+            name.equals("Kiara", ignoreCase = true) -> "Class 8"
+            age >= 6 -> "Class ${age - 5}"
+            else -> "Student"
+        }
+}
 
 data class InstalledApp(
     val packageName: String,
     val appName: String,
-    val category: String, // "Social", "Video", "Games", "Shopping", "Other"
+    val category: String, // "Social", "Video", "Games", "Shopping", "Browsers", "Other"
     val iconHash: String = "",
-    val isSystemApp: Boolean = false
+    val isSystemApp: Boolean = false,
+    val childOwnerName: String = ""
 )
 
 data class FocusPolicy(
@@ -169,9 +186,12 @@ data class FocusCard(
     val id: String,
     val cardId: String,           // e.g. FC0001
     val token: String,            // e.g. 8XK92LM7
+    val familyId: String = "family_1",
+    val isEnabled: Boolean = true,
+    val label: String = "Family card",
     val ownerParentId: String? = null,
-    val assignedChildId: String? = null,
-    val status: CardStatus = CardStatus.IN_STOCK,
+    val assignedChildId: String? = null, // Deprecated: cards are family-wide
+    val status: CardStatus = CardStatus.ACTIVE,
     val registeredAt: String = "2026-10-08",
     val nfcUid: String = "04:A3:91:7B:22:6C",
     val ownerId: String? = ownerParentId,
@@ -179,7 +199,8 @@ data class FocusCard(
     val createdAt: String = registeredAt,
     val assignedAt: String? = null,
     val ndefPayload: String = "FOCUSCARD:$token",
-    val lastUsed: String = "Today at 09:30 AM"
+    val lastUsed: String = "Today at 09:30 AM",
+    val lastUsedChildName: String? = "Aarav"
 )
 
 data class QrToken(
@@ -215,7 +236,10 @@ data class ScheduleItem(
     val mode: FocusMode,
     val isEnabled: Boolean,
     val appsCount: Int,
-    val websitesCount: Int
+    val websitesCount: Int,
+    val policyName: String = "Study Mode",
+    val allowCardExit: Boolean = false,
+    val childId: String = ""
 )
 
 data class FriendUser(

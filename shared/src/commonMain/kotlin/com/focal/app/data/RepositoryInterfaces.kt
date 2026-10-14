@@ -8,8 +8,14 @@ import com.focal.app.model.*
 interface AuthRepository {
     suspend fun signIn(email: String, password: String): Result<User>
     suspend fun signUp(name: String, email: String, password: String): Result<User>
+    suspend fun signInWithGoogle(): Result<User>
+    suspend fun sendPasswordReset(email: String): Result<Unit>
     suspend fun signOut()
     fun getCurrentUser(): User?
+
+    companion object {
+        val instance: AuthRepository by lazy { LocalAuthRepository() }
+    }
 }
 
 // -------------------------------------------------------------

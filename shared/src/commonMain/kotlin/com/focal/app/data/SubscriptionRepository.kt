@@ -3,6 +3,7 @@ package com.focal.app.data
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.focal.app.config.FocalPricingConfig
 import com.focal.app.model.User
 
 enum class EntitlementState {
@@ -15,7 +16,7 @@ data class SubscriptionDetails(
     val isTrial: Boolean,
     val trialDaysRemaining: Int,
     val renewalDate: String,
-    val monthlyPriceInr: Int = 299,
+    val monthlyPriceInr: Int = FocalPricingConfig.PLAN_MONTHLY_PRICE_INR,
     val paymentFailed: Boolean = false,
     val isExpired: Boolean = false,
     val entitlementState: EntitlementState = EntitlementState.FULL_ACCESS
@@ -82,7 +83,7 @@ class DemoSubscriptionRepository : SubscriptionRepository {
     override suspend fun getBillingHistory(): List<Map<String, String>> {
         return listOf(
             mapOf("date" to "2026-09-18", "description" to "3-Month Free Trial Started", "amount" to "₹0"),
-            mapOf("date" to "2026-12-18", "description" to "FOCAL Premium Family (Upcoming)", "amount" to "₹299")
+            mapOf("date" to "2026-12-18", "description" to "FOCAL Premium Family (Upcoming)", "amount" to FocalPricingConfig.PLAN_PRICE_FORMATTED)
         )
     }
 

@@ -21,6 +21,7 @@ actual object PlatformPermissionsHelper {
     actual fun isDeviceAdminActive(): Boolean = true
     actual fun hasNfcHardware(): Boolean = true
     actual fun isNfcEnabled(): Boolean = true
+    actual fun isAnimationsDisabled(): Boolean = false
 
     actual fun openNewBrowserTab() {}
     actual fun getRealDailyScreenTimeMinutes(): Int = 0
@@ -28,6 +29,18 @@ actual object PlatformPermissionsHelper {
     actual fun markSetupPageOpened() {}
     actual fun isSetupPageGraceActive(): Boolean = false
     actual fun copyToClipboard(text: String) {}
+    actual fun showToast(message: String) {}
+    actual fun getAppVersionName(): String = "1.0.0"
+    actual fun getAppVersionCode(): String = "1"
+    actual fun getDeviceManufacturer(): String = "Apple"
+    actual fun getAndroidVersion(): String = "iOS"
+
+    actual fun openEmailSupport(email: String, subject: String) {}
+    actual fun openUrl(url: String) {}
+    actual fun setKeepScreenOn(enable: Boolean) {}
+    actual fun setMaxBrightness(enable: Boolean) {}
+    actual fun shareQrCode(title: String, payload: String) {}
+    actual fun printQrCode(title: String, payload: String) {}
 }
 
 @androidx.compose.runtime.Composable

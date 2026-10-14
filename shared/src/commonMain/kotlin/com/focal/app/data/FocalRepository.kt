@@ -74,6 +74,18 @@ class FocalRepository private constructor() {
 
     fun updateParentPin(newPin: String) {
         parentPin = newPin
+        com.focal.app.protection.ProtectionStateRepository.instance.setParentPin(newPin)
+    }
+
+    fun renameCard(cardId: String, newLabel: String) {
+        val idx = nfcCards.indexOfFirst { it.cardId.equals(cardId, ignoreCase = true) }
+        if (idx >= 0) {
+            nfcCards[idx] = nfcCards[idx].copy(label = newLabel)
+        }
+    }
+
+    fun removeCard(cardId: String) {
+        nfcCards.removeAll { it.cardId.equals(cardId, ignoreCase = true) }
     }
 
     fun deleteParentAccount() {
@@ -82,6 +94,9 @@ class FocalRepository private constructor() {
         policies.clear()
         schedules.clear()
         notifications.clear()
+        parentPin = ""
+        com.focal.app.pairing.PairingRepository.instance.unlink()
+        com.focal.app.protection.ProtectionStateRepository.instance.reset()
     }
 
     val childRahul = User(
@@ -114,37 +129,65 @@ class FocalRepository private constructor() {
     val childrenList = mutableStateListOf(
         ChildProfile(
             id = "child_1",
-            userId = "user_ananya",
+            userId = "user_rahul",
             controllerId = "user_priya",
-            name = "Ananya",
+            name = "Aarav",
+            familyId = "family_1",
+            defaultPolicyId = "pol_study",
+            defaultFocusMinutes = 90,
+            age = 15,
+            grade = "Class 10",
+            isOnline = true,
+            isFocusing = true,
+            todayFocusMinutes = 135,
+            screenTimeMinutes = 192,
+            focusScore = 88,
+            timeSavedMinutes = 75,
+            streakDays = 3,
+            currentSessionId = "sess_active_1",
+            remainingMinutes = 42,
+            pairedCardId = "FC0001",
+            deviceName = "Realme · Android 14"
+        ),
+        ChildProfile(
+            id = "child_2",
+            userId = "user_kiara",
+            controllerId = "user_priya",
+            name = "Kiara",
+            familyId = "family_1",
+            defaultPolicyId = "pol_study",
+            defaultFocusMinutes = 90,
             age = 11,
+            grade = "Class 8",
             isOnline = true,
             isFocusing = false,
-            todayFocusMinutes = 0,
-            screenTimeMinutes = 140, // 2h 20m
-            focusScore = 95,
+            todayFocusMinutes = 110, // 1h 50m
+            screenTimeMinutes = 120,
+            focusScore = 92,
             timeSavedMinutes = 45,
-            streakDays = 8,
+            streakDays = 5,
             currentSessionId = null,
             remainingMinutes = 0,
-            pairedCardId = null, // Programmed live in demo
-            deviceName = "Ananya's Phone"
+            pairedCardId = "FC0001",
+            deviceName = "Kiara's Galaxy Tab"
         )
     )
 
     // Installed Apps uploaded from Child Device
     val childInstalledApps = mutableStateListOf(
         InstalledApp("com.instagram.android", "Instagram", "Social", "hash1"),
-        InstalledApp("com.zhiliaoapp.musically", "TikTok", "Social", "hash2"),
-        InstalledApp("com.snapchat.android", "Snapchat", "Social", "hash3"),
         InstalledApp("com.google.android.youtube", "YouTube", "Video", "hash4"),
-        InstalledApp("com.netflix.mediaclient", "Netflix", "Video", "hash5"),
-        InstalledApp("com.supercell.clashofclans", "Clash of Clans", "Games", "hash6"),
-        InstalledApp("com.roblox.client", "Roblox", "Games", "hash7"),
+        InstalledApp("com.zhiliaoapp.musically", "TikTok", "Video", "hash2"),
         InstalledApp("com.amazon.mShop.android.shopping", "Amazon", "Shopping", "hash8"),
+        InstalledApp("com.pubg.imobile", "BGMI", "Games", "hash_bgmi"),
+        InstalledApp("com.android.chrome", "Chrome", "Browsers", "hash_chrome"),
+        InstalledApp("com.whatsapp", "WhatsApp", "Social", "hash11"),
+        InstalledApp("com.snapchat.android", "Snapchat", "Social", "hash3"),
+        InstalledApp("com.netflix.mediaclient", "Netflix", "Video", "hash5"),
+        InstalledApp("com.roblox.client", "Roblox", "Games", "hash7"),
+        InstalledApp("com.supercell.clashofclans", "Clash of Clans", "Games", "hash6"),
         InstalledApp("com.flipkart.android", "Flipkart", "Shopping", "hash9"),
-        InstalledApp("org.telegram.messenger", "Telegram", "Messaging", "hash10"),
-        InstalledApp("com.whatsapp", "WhatsApp", "Messaging", "hash11")
+        InstalledApp("org.telegram.messenger", "Telegram", "Social", "hash10")
     )
 
     // Sync installed app list from child device
@@ -163,7 +206,39 @@ class FocalRepository private constructor() {
         if (slashIdx != -1) clean = clean.substring(0, slashIdx)
         val colonIdx = clean.indexOf(':')
         if (colonIdx != -1) clean = clean.substring(0, colonIdx)
+        val queryIdx = clean.indexOf('?')
+        if (queryIdx != -1) clean = clean.substring(0, queryIdx)
+        val hashIdx = clean.indexOf('#')
+        if (hashIdx != -1) clean = clean.substring(0, hashIdx)
         return clean
+    }
+
+    fun isValidDomainFormat(domain: String): Boolean {
+        val clean = normalizeDomain(domain)
+        val domainRegex = Regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
+        return domainRegex.matches(clean)
+    }
+
+    fun isAppBlockable(app: InstalledApp): Boolean {
+        val pkg = app.packageName.lowercase()
+        val name = app.appName.lowercase()
+
+        // 1. Phone / Dialer
+        if (pkg.contains("dialer") || pkg.contains("telecom") || name == "phone" || name == "telephone") return false
+
+        // 2. Settings & System Settings
+        if (pkg.contains("settings") || name == "settings") return false
+
+        // 3. FOCAL itself
+        if (pkg.contains("com.focal.app") || name == "focal") return false
+
+        // 4. Emergency & System UI
+        if (pkg.contains("emergency") || pkg.contains("systemui") || pkg.contains("com.android.systemui")) return false
+
+        // 5. Default Launchers / Homescreen
+        if (pkg.contains("launcher") || name.contains("launcher") || pkg.contains("trebuchet") || pkg.contains("pixel launcher")) return false
+
+        return true
     }
 
     fun isDomainBlocked(targetUrlOrDomain: String, blockedDomains: List<String>): Boolean {
@@ -183,8 +258,8 @@ class FocalRepository private constructor() {
             name = "Study Mode",
             mode = FocusMode.STUDY,
             durationMinutes = 60,
-            blockedApps = listOf("Instagram", "TikTok", "Snapchat", "YouTube", "Netflix", "Clash of Clans", "Roblox", "Telegram"),
-            blockedWebsites = listOf("instagram.com", "tiktok.com", "snapchat.com", "youtube.com", "netflix.com", "facebook.com", "reddit.com", "twitch.tv", "amazon.com", "flipkart.com"),
+            blockedApps = listOf("Instagram", "YouTube", "TikTok", "BGMI", "Snapchat", "Netflix", "Roblox", "Clash of Clans"),
+            blockedWebsites = listOf("instagram.com", "youtube.com", "tiktok.com", "snapchat.com", "netflix.com", "facebook.com", "reddit.com", "twitch.tv", "amazon.com", "flipkart.com"),
             scheduleDays = listOf("Mon", "Tue", "Wed", "Thu", "Fri"),
             scheduleStartTime = "16:00",
             scheduleEndTime = "17:00",
@@ -207,8 +282,24 @@ class FocalRepository private constructor() {
         )
     )
 
-    // Registered NFC Cards (0 initially; programmed live during demo)
-    val nfcCards = mutableStateListOf<FocusCard>()
+    // Registered NFC Cards (ONE family card for the entire family by default)
+    val nfcCards = mutableStateListOf(
+        FocusCard(
+            id = "card_family_1",
+            cardId = "FC0001",
+            token = "FC0001_TOKEN",
+            familyId = "family_1",
+            ownerParentId = "user_priya",
+            ownerId = "user_priya",
+            ownerName = "Priya Sharma",
+            assignedChildId = null,
+            status = CardStatus.ACTIVE,
+            isEnabled = true,
+            registeredAt = "12 Sep 2026",
+            ndefPayload = "FOCUSCARD:FC0001",
+            lastUsed = "Today, 10:02 AM"
+        )
+    )
 
     // QR Tokens
     val qrTokens = mutableStateListOf(
@@ -246,9 +337,9 @@ class FocalRepository private constructor() {
             id = "req_1",
             sessionId = "sess_active_1",
             childId = "child_1",
-            childName = "Rahul",
-            reason = "Need to submit school science assignment on Google Classroom",
-            requestedAt = "10 minutes ago",
+            childName = "Aarav",
+            reason = "Need to call someone",
+            requestedAt = "2 min ago",
             status = "PENDING"
         )
     )
@@ -256,64 +347,40 @@ class FocalRepository private constructor() {
     // Schedules
     val schedules = mutableStateListOf(
         ScheduleItem(
-            id = "sch_1",
-            title = "Morning Zen",
-            timeRange = "6 AM – 9 AM",
-            days = "Mon, Tue, Wed, Thu, Fri",
-            mode = FocusMode.STUDY,
-            isEnabled = true,
-            appsCount = 8,
-            websitesCount = 15
-        ),
-        ScheduleItem(
             id = "sch_2",
             title = "Deep Work",
-            timeRange = "10 AM – 12 PM",
-            days = "Mon, Tue, Wed, Thu, Fri",
+            timeRange = "10:00 AM – 12:00 PM",
+            days = "Mon – Fri",
             mode = FocusMode.DEEP_WORK,
             isEnabled = true,
             appsCount = 12,
-            websitesCount = 20
+            websitesCount = 20,
+            policyName = "Study Mode",
+            allowCardExit = false
         ),
         ScheduleItem(
             id = "sch_3",
-            title = "Focus Zone",
-            timeRange = "1 PM – 5 PM",
-            days = "All Days",
+            title = "Homework",
+            timeRange = "4:00 – 6:00 PM",
+            days = "Every day",
             mode = FocusMode.WORK,
-            isEnabled = false,
-            appsCount = 6,
-            websitesCount = 10
-        ),
-        ScheduleItem(
-            id = "sch_4",
-            title = "Wind Down",
-            timeRange = "6 PM – 9 PM",
-            days = "Mon, Tue, Wed, Thu, Fri",
-            mode = FocusMode.DIGITAL_DETOX,
             isEnabled = true,
-            appsCount = 15,
-            websitesCount = 25
+            appsCount = 6,
+            websitesCount = 10,
+            policyName = "Study Mode",
+            allowCardExit = false
         ),
         ScheduleItem(
             id = "sch_5",
             title = "Night Guard",
-            timeRange = "10 PM – 5 AM",
-            days = "Every Night",
+            timeRange = "10:00 PM – 6:00 AM",
+            days = "Every night",
             mode = FocusMode.SLEEP,
-            isEnabled = true,
-            appsCount = 25,
-            websitesCount = 50
-        ),
-        ScheduleItem(
-            id = "sch_6",
-            title = "Full Focus",
-            timeRange = "24 Hours",
-            days = "Weekends",
-            mode = FocusMode.DIGITAL_DETOX,
             isEnabled = false,
-            appsCount = 30,
-            websitesCount = 60
+            appsCount = 25,
+            websitesCount = 50,
+            policyName = "Wind Down",
+            allowCardExit = false
         )
     )
 
@@ -424,18 +491,19 @@ class FocalRepository private constructor() {
 
     // Server-side Subscription Verification
     fun canStartFocus(user: User): Pair<Boolean, String> {
+        val planPrice = com.focal.app.config.FocalPricingConfig.PLAN_PRICE_PER_MONTH
         return when (user.subscriptionStatus) {
             SubscriptionStatus.TRIAL -> {
                 if (user.trialDaysRemaining > 0) {
                     true to "Trial valid (${user.trialDaysRemaining} days remaining)"
                 } else {
-                    false to "Your free trial has expired. Subscribe for ₹299/mo to continue."
+                    false to "Your free trial has expired. Subscribe for $planPrice to continue."
                 }
             }
             SubscriptionStatus.ACTIVE -> true to "Subscription active"
-            SubscriptionStatus.EXPIRED -> false to "Subscription expired. Please renew for ₹299/mo."
+            SubscriptionStatus.EXPIRED -> false to "Subscription expired. Please renew for $planPrice."
             SubscriptionStatus.PAST_DUE -> false to "Payment past due. Update billing to continue."
-            SubscriptionStatus.CANCELLED -> false to "Subscription cancelled. Reactivate for ₹299/mo."
+            SubscriptionStatus.CANCELLED -> false to "Subscription cancelled. Reactivate for $planPrice."
         }
     }
 
@@ -592,26 +660,23 @@ class FocalRepository private constructor() {
         }
     }
 
-    // Validate NFC card for starting focus (Child tap)
+    // Validate NFC card for starting focus (Child tap - family-wide card)
     fun validateNfcCardForChildStart(cardIdOrToken: String, childUser: User): Result<FocusCard> {
         val childProfile = childrenList.find { it.userId == childUser.id || it.name.equals(childUser.name, ignoreCase = true) }
-        val childId = childProfile?.id ?: "child_1"
-
         val card = nfcCards.find {
             it.cardId.equals(cardIdOrToken, ignoreCase = true) ||
             it.token.equals(cardIdOrToken, ignoreCase = true) ||
             it.ndefPayload.contains(cardIdOrToken, ignoreCase = true)
-        } ?: return Result.failure(Exception("This card isn't paired to you."))
+        } ?: return Result.failure(Exception("This isn't your family's FOCAL card."))
 
-        if (card.status != CardStatus.ASSIGNED) {
-            return Result.failure(Exception("This card isn't paired to you."))
+        val cardFamily = card.familyId.ifBlank { "family_1" }
+        val userFamily = childUser.familyId.ifBlank { childProfile?.familyId ?: "family_1" }
+        if (cardFamily != userFamily) {
+            return Result.failure(Exception("This isn't your family's FOCAL card."))
         }
 
-        val isAssignedToThisChild = (card.assignedChildId == childId) ||
-                (childProfile?.pairedCardId != null && childProfile.pairedCardId.equals(card.cardId, ignoreCase = true))
-
-        if (!isAssignedToThisChild) {
-            return Result.failure(Exception("This card isn't paired to you."))
+        if (!card.isEnabled || card.status == CardStatus.DISABLED || card.status == CardStatus.REVOKED) {
+            return Result.failure(Exception("This card has been disabled by your parent."))
         }
 
         val (canFocus, message) = canStartFocus(childUser)
@@ -622,28 +687,68 @@ class FocalRepository private constructor() {
         return Result.success(card)
     }
 
-    // Validate NFC card for ending focus early (Must be the SAME paired card)
+    // Validate NFC card for ending focus early (family-wide card)
     fun validateNfcCardForChildEnd(cardIdOrToken: String, childUser: User, currentSession: FocusSession?): Result<FocusCard> {
         val card = nfcCards.find {
             it.cardId.equals(cardIdOrToken, ignoreCase = true) ||
             it.token.equals(cardIdOrToken, ignoreCase = true) ||
             it.ndefPayload.contains(cardIdOrToken, ignoreCase = true)
-        } ?: return Result.failure(Exception("Only your paired card FC0001 can unlock this session."))
+        } ?: return Result.failure(Exception("This isn't your family's FOCAL card."))
 
         val childProfile = childrenList.find { it.userId == childUser.id || it.name.equals(childUser.name, ignoreCase = true) }
-        val expectedCardId = childProfile?.pairedCardId ?: "FC0001"
+        val cardFamily = card.familyId.ifBlank { "family_1" }
+        val userFamily = childUser.familyId.ifBlank { childProfile?.familyId ?: "family_1" }
+        if (cardFamily != userFamily) {
+            return Result.failure(Exception("This isn't your family's FOCAL card."))
+        }
 
-        if (!card.cardId.equals(expectedCardId, ignoreCase = true)) {
-            return Result.failure(Exception("Only your paired card $expectedCardId can unlock this session."))
+        if (!card.isEnabled || card.status == CardStatus.DISABLED || card.status == CardStatus.REVOKED) {
+            return Result.failure(Exception("This card has been disabled by your parent."))
         }
 
         return Result.success(card)
     }
 
-    // Validate QR token for starting focus (Single-use, 10-minute expiry, child-bound)
-    fun validateQrTokenForChildStart(qrPayload: String, childUser: User): Result<Pair<FocusPolicy, Int>> {
-        val qrToken = qrTokens.find { it.token == qrPayload }
+    // Disable a family card immediately across all child devices
+    fun disableCard(cardId: String) {
+        val idx = nfcCards.indexOfFirst { it.cardId.equals(cardId, ignoreCase = true) }
+        if (idx >= 0) {
+            nfcCards[idx] = nfcCards[idx].copy(isEnabled = false, status = CardStatus.DISABLED)
+        }
+    }
 
+    // Enable a family card across all child devices
+    fun enableCard(cardId: String) {
+        val idx = nfcCards.indexOfFirst { it.cardId.equals(cardId, ignoreCase = true) }
+        if (idx >= 0) {
+            nfcCards[idx] = nfcCards[idx].copy(isEnabled = true, status = CardStatus.ACTIVE)
+        }
+    }
+
+    // Validate QR token for starting focus (Family QR or single-use token)
+    fun validateQrTokenForChildStart(qrPayload: String, childUser: User): Result<Pair<FocusPolicy, Int>> {
+        val trimmed = qrPayload.trim()
+        if (trimmed.startsWith("focal://pair", ignoreCase = true)) {
+            return Result.failure(Exception("That's not a FOCAL focus QR"))
+        }
+
+        val childProfile = childrenList.find { it.userId == childUser.id || it.name.equals(childUser.name, ignoreCase = true) }
+        val userFamily = childUser.familyId.ifBlank { childProfile?.familyId ?: "family_1" }
+
+        // 1. Family Focus QR check
+        if (FocusQrRepository.instance.validateFamilyQr(trimmed, userFamily)) {
+            val (canFocus, message) = canStartFocus(childUser)
+            if (!canFocus) {
+                return Result.failure(Exception(message))
+            }
+            val policyId = childProfile?.defaultPolicyId ?: "pol_study"
+            val policy = policies.find { it.id == policyId } ?: policies.first()
+            val durationMinutes = childProfile?.defaultFocusMinutes ?: 90
+            return Result.success(policy to durationMinutes)
+        }
+
+        // 2. Individual QR Tokens
+        val qrToken = qrTokens.find { it.token == trimmed }
         if (qrToken != null) {
             if (qrToken.childId != childUser.id && qrToken.childId != "child_1" && !currentUser.name.contains(qrToken.childId, ignoreCase = true)) {
                 return Result.failure(Exception("This Focus QR token is meant for another child's phone."))
@@ -661,23 +766,15 @@ class FocalRepository private constructor() {
 
             val policy = policies.find { it.id == qrToken.policyId } ?: policies.first()
             return Result.success(policy to qrToken.durationMinutes)
-        } else {
-            if (qrPayload.contains("EXPIRED")) {
-                return Result.failure(Exception("This Focus QR token has expired (10 min expiry)."))
-            }
-            if (usedQrNonces.contains(qrPayload)) {
-                return Result.failure(Exception("This QR code has already been used."))
-            }
-            usedQrNonces.add(qrPayload)
-            val policy = policies.first()
-            return Result.success(policy to policy.durationMinutes)
         }
+
+        return Result.failure(Exception("That's not a FOCAL focus QR"))
     }
 
     // Verify NFC card
     fun verifyNfcCard(cardId: String, nfcUid: String, token: String): Result<FocusCard> {
         val card = nfcCards.find { it.cardId.equals(cardId, ignoreCase = true) || it.token.equals(token, ignoreCase = true) }
-            ?: return Result.failure(Exception("This card isn't paired to you."))
+            ?: return Result.failure(Exception("This isn't your family's FOCAL card."))
 
         if (card.status == CardStatus.BLOCKED || card.status == CardStatus.DEACTIVATED) {
             return Result.failure(Exception("This Focus Card has been deactivated by administrator."))
@@ -801,6 +898,39 @@ class FocalRepository private constructor() {
         policies.removeAll { it.id == policyId }
     }
 
+    data class PolicyUsage(
+        val children: List<ChildProfile>,
+        val schedules: List<ScheduleItem>
+    ) {
+        val isUsed: Boolean get() = children.isNotEmpty() || schedules.isNotEmpty()
+    }
+
+    fun getPolicyUsage(policyId: String): PolicyUsage {
+        val policy = policies.find { it.id == policyId }
+        val pName = policy?.name ?: ""
+        val children = childrenList.filter { it.defaultPolicyId == policyId || it.defaultPolicyId.equals(pName, ignoreCase = true) }
+        val scheds = schedules.filter { it.policyName.equals(pName, ignoreCase = true) || it.policyName.equals(policyId, ignoreCase = true) }
+        return PolicyUsage(children, scheds)
+    }
+
+    fun deletePolicyWithReplacement(policyId: String, replacementPolicyId: String) {
+        val oldPolicy = policies.find { it.id == policyId }
+        val newPolicy = policies.find { it.id == replacementPolicyId }
+        if (oldPolicy != null && newPolicy != null) {
+            childrenList.forEachIndexed { index, child ->
+                if (child.defaultPolicyId == policyId || child.defaultPolicyId.equals(oldPolicy.name, ignoreCase = true)) {
+                    childrenList[index] = child.copy(defaultPolicyId = newPolicy.id)
+                }
+            }
+            schedules.forEachIndexed { index, sch ->
+                if (sch.policyName.equals(oldPolicy.name, ignoreCase = true) || sch.policyName.equals(policyId, ignoreCase = true)) {
+                    schedules[index] = sch.copy(policyName = newPolicy.name)
+                }
+            }
+        }
+        policies.removeAll { it.id == policyId }
+    }
+
     // Generate Focus QR (Controller)
     fun generateFocusQr(childId: String, policyId: String, policyTitle: String, durationMinutes: Int): QrToken {
         val secureToken = "FOCAL_QR_${(100000..999999).random()}_${currentTimeMillis().toString().takeLast(4)}"
@@ -834,6 +964,12 @@ class FocalRepository private constructor() {
             status = "PENDING"
         )
         emergencyRequests.add(0, req)
+        ActivityRepository.instance.recordEvent(
+            type = ActivityEventType.EXIT_REQUESTED,
+            childId = currentUser.id,
+            details = "${currentUser.name} requested early exit: '${reason.ifEmpty { "No reason provided" }}'",
+            metadata = mapOf("sessionId" to sessionId, "reason" to reason)
+        )
         notifications.add(0, NotificationItem(
             id = "notif_${currentTimeMillis()}",
             userId = controllerUser.id,
@@ -855,6 +991,15 @@ class FocalRepository private constructor() {
             if (approve) {
                 com.focal.app.engine.FocusEngine.instance.endFocusWithEmergency()
             }
+
+            val eventType = if (approve) ActivityEventType.EXIT_APPROVED else ActivityEventType.EXIT_DECLINED
+            val eventDetails = if (approve) "Parent Priya approved emergency exit for ${req.childName}" else "Parent Priya declined emergency exit for ${req.childName}"
+            ActivityRepository.instance.recordEvent(
+                type = eventType,
+                childId = req.childId,
+                details = eventDetails,
+                metadata = mapOf("requestId" to requestId)
+            )
 
             notifications.add(0, NotificationItem(
                 id = "notif_${currentTimeMillis()}",
@@ -940,6 +1085,48 @@ class FocalRepository private constructor() {
         }
     }
 
+    // Save schedule (create or update)
+    fun saveSchedule(schedule: ScheduleItem) {
+        val index = schedules.indexOfFirst { it.id == schedule.id }
+        if (index >= 0) {
+            schedules[index] = schedule
+        } else {
+            schedules.add(0, schedule)
+        }
+    }
+
+    // Delete schedule
+    fun deleteSchedule(scheduleId: String) {
+        schedules.removeAll { it.id == scheduleId }
+    }
+
+    // Update child profile
+    fun updateChild(updated: ChildProfile) {
+        val index = childrenList.indexOfFirst { it.id == updated.id }
+        if (index >= 0) {
+            childrenList[index] = updated
+        }
+    }
+
+    // Remove child profile
+    fun removeChild(childId: String) {
+        childrenList.removeAll { it.id == childId }
+    }
+
+    // Unlink child device
+    fun unlinkChildDevice(childId: String) {
+        val index = childrenList.indexOfFirst { it.id == childId }
+        if (index >= 0) {
+            childrenList[index] = childrenList[index].copy(
+                deviceName = "",
+                pairedCardId = null,
+                isOnline = false,
+                isFocusing = false,
+                remainingMinutes = 0
+            )
+        }
+    }
+
     // Add Child
     fun addChild(name: String, age: Int, emailOrPhone: String): Pair<ChildProfile, String> {
         val newChild = ChildProfile(
@@ -976,6 +1163,7 @@ class FocalRepository private constructor() {
 
     // Parent Unlock Timer (Pauses settings guard for 10 minutes)
     var parentUnlockedUntilMs by mutableStateOf(0L)
+    var showParentUnlockScreen by mutableStateOf(false)
 
     fun isParentGuardUnlocked(): Boolean {
         return currentTimeMillis() < parentUnlockedUntilMs
@@ -999,9 +1187,13 @@ class FocalRepository private constructor() {
         return "Parent unlock active for 10 minutes. Settings access permitted."
     }
 
-    fun reportProtectionDisabled(reason: String) {
+    fun reportProtectionDisabled(reason: String, childId: String = "child_1") {
         isProtectionDisabledOnChild = true
         protectionDisabledReason = reason
+        val idx = childrenList.indexOfFirst { it.id == childId }
+        if (idx >= 0) {
+            childrenList[idx] = childrenList[idx].copy(isProtectionOff = true)
+        }
 
         val existingNotif = notifications.find { it.type == "PROTECTION_OFF" }
         if (existingNotif == null) {
@@ -1010,24 +1202,39 @@ class FocalRepository private constructor() {
                 userId = controllerUser.id,
                 type = "PROTECTION_OFF",
                 title = "Focus Protection Disabled",
-                message = "Rahul's phone disabled protection: $reason",
+                message = "Phone disabled protection: $reason",
                 timestamp = "Just now"
             ))
+            com.focal.app.data.ActivityRepository.instance.recordEvent(
+                type = com.focal.app.data.ActivityEventType.PROTECTION_OFF,
+                childId = childId,
+                details = reason,
+                metadata = mapOf("permission" to "Accessibility")
+            )
         }
     }
 
-    fun reportProtectionRestored() {
+    fun reportProtectionRestored(childId: String = "child_1") {
         isProtectionDisabledOnChild = false
         protectionDisabledReason = ""
+        val idx = childrenList.indexOfFirst { it.id == childId }
+        if (idx >= 0) {
+            childrenList[idx] = childrenList[idx].copy(isProtectionOff = false)
+        }
 
         notifications.add(0, NotificationItem(
             id = "notif_${currentTimeMillis()}",
             userId = controllerUser.id,
             type = "PROTECTION_RESTORED",
             title = "Focus Protection Restored",
-            message = "Rahul's phone restored all required permissions.",
+            message = "Phone restored all required permissions.",
             timestamp = "Just now"
         ))
+        com.focal.app.data.ActivityRepository.instance.recordEvent(
+            type = com.focal.app.data.ActivityEventType.PROTECTION_ON,
+            childId = childId,
+            details = "All permissions on"
+        )
     }
 
     fun processChildHeartbeat(childId: String = "child_1", permissionsMap: Map<String, Boolean> = emptyMap(), battery: Int = 85) {
@@ -1047,16 +1254,16 @@ class FocalRepository private constructor() {
                 userId = controllerUser.id,
                 type = "DEVICE_ONLINE",
                 title = "Device Back Online",
-                message = "Heartbeats resumed from Rahul's phone.",
+                message = "Heartbeats resumed from phone.",
                 timestamp = "Just now"
             ))
         }
 
         val isAnyOff = permissionsMap.values.any { !it }
         if (isAnyOff) {
-            reportProtectionDisabled("Permissions missing in heartbeat signal")
+            reportProtectionDisabled("Accessibility was turned off", childId)
         } else if (isProtectionDisabledOnChild && permissionsMap.isNotEmpty() && !isAnyOff) {
-            reportProtectionRestored()
+            reportProtectionRestored(childId)
         }
     }
 

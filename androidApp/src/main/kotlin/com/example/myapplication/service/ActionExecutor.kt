@@ -81,6 +81,19 @@ object ActionExecutor {
 
             if (isOverlayEnabled) {
                 actionTakenText = "Overlay Shown + HOME (${decision.label})"
+                val onUnlockAction: (() -> Unit)? = if (decision is ProtectionDecision.LockSettings || decision is ProtectionDecision.BlockUninstall) {
+                    {
+                        com.focal.app.data.FocalRepository.instance.showParentUnlockScreen = true
+                        BlockOverlayManager.dismissOverlay(context)
+                        try {
+                            val appIntent = Intent(context, com.example.myapplication.MainActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            }
+                            context.startActivity(appIntent)
+                        } catch (_: Exception) {}
+                    }
+                } else null
+
                 BlockOverlayManager.showOverlay(
                     context = context,
                     title = titleText,
@@ -88,7 +101,8 @@ object ActionExecutor {
                     decision = decision,
                     onBackToFocusClick = {
                         // Staying on home screen behind overlay
-                    }
+                    },
+                    onParentUnlockClick = onUnlockAction
                 )
             } else {
                 actionTakenText = "BlockActivity Launched + HOME (${decision.label})"

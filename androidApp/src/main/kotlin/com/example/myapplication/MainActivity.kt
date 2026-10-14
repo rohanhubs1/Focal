@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
 
         // Bind Context to Permissions Helper
         com.focal.app.ui.components.PlatformPermissionsHelper.appContext = applicationContext
+        com.focal.app.ui.components.PlatformPermissionsHelper.currentActivity = java.lang.ref.WeakReference(this)
 
         // Discover and load installed apps for the Policy App Picker & listen for installs/uninstalls
         AndroidAppPickerManager.loadInstalledAppsIntoRepository(this)
@@ -106,6 +107,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        com.focal.app.ui.components.PlatformPermissionsHelper.currentActivity = java.lang.ref.WeakReference(this)
         enableNfcForegroundDispatch()
         com.example.myapplication.nfc.AndroidNfcManager.enableReaderMode(this) { tag ->
             com.example.myapplication.nfc.AndroidNfcManager.handleTagDiscovered(tag, this)
@@ -143,12 +145,19 @@ class MainActivity : ComponentActivity() {
                     PendingIntent.FLAG_UPDATE_CURRENT
                 }
                 val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags)
+                val ndefFilter = IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED).apply {
+                    addDataScheme("vnd.android.nfc")
+                    addDataAuthority("ext", null)
+                    addDataPath("/nfcguard.io:card", android.os.PatternMatcher.PATTERN_PREFIX)
+                }
                 val filters = arrayOf(
-                    IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED),
+                    ndefFilter,
                     IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED),
-                    IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED)
+                    IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED),
+                    IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
                 )
-                adapter.enableForegroundDispatch(this, pendingIntent, filters, null)
+                val techLists = arrayOf(arrayOf(android.nfc.tech.NfcA::class.java.name))
+                adapter.enableForegroundDispatch(this, pendingIntent, filters, techLists)
             }
         }
     }

@@ -14,13 +14,21 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import com.example.myapplication.BuildConfig
+import com.focal.app.config.FocalConfig
 import com.focal.app.data.FocalRepository
 import com.focal.app.engine.FocusEngine
 import com.focal.app.model.CardStatus
 import com.focal.app.model.FocusCard
 import com.focal.app.model.SessionState
 import com.focal.app.model.TriggerType
+import com.focal.nfcguard.AndroidNfcTransceiver
+import com.focal.nfcguard.CardCrypto
+import com.focal.nfcguard.CardScan
+import com.focal.nfcguard.NfcGuardGate
+import com.focal.nfcguard.NtagReader
 import java.nio.charset.Charset
+import java.security.PublicKey
 
 object AndroidNfcManager {
 
@@ -29,6 +37,16 @@ object AndroidNfcManager {
     var pendingProgramToken: String? = null
     var lastErrorMessage: String? = null
     var detectedPreWrittenToken: String? = null
+
+    private var cachedPublicKey: PublicKey? = null
+
+    fun getPublicKey(context: Context): PublicKey {
+        cachedPublicKey?.let { return it }
+        val pem = context.assets.open("public_key.pem").bufferedReader().use { it.readText() }
+        val key = CardCrypto.loadPublicKeyPem(pem)
+        cachedPublicKey = key
+        return key
+    }
 
     private var readerModeCallback: NfcAdapter.ReaderCallback? = null
 
@@ -162,7 +180,7 @@ object AndroidNfcManager {
         val repo = FocalRepository.instance
         val engine = FocusEngine.instance
 
-        // 1. Program Card Flow (Write NDEF FOCUSCARD:<token> to NTAG215)
+        // 1. Program Card Flow (Write NDEF FOCUSCARD:<token> to blank card if active)
         if (isProgrammingMode || !pendingProgramCardId.isNullOrBlank()) {
             val cId = pendingProgramCardId ?: "FC0001"
             val token = pendingProgramToken ?: (10000000..99999999).random().toString(36).uppercase().take(8)
@@ -181,20 +199,96 @@ object AndroidNfcManager {
             }
         }
 
-        // 2. Pre-written Tag Detection ("Use this card")
+        // 2. Cryptographic NFC Guard Card Verification (Checks 1–3)
+        var scan: CardScan? = null
+        try {
+            AndroidNfcTransceiver(tag).use { transceiver ->
+                val reader = NtagReader(transceiver)
+                scan = reader.scan()
+            }
+        } catch (e: Exception) {
+            android.util.Log.d("AndroidNfcManager", "NtagReader scan exception: ${e.message}")
+        }
+
+        val cardScan = scan
+        val cardPayload = cardScan?.payload
+        if (cardScan != null && cardPayload != null) {
+            val pubKey = try {
+                getPublicKey(context)
+            } catch (e: Exception) {
+                android.util.Log.e("AndroidNfcManager", "Failed to load public_key.pem", e)
+                null
+            }
+
+            if (pubKey != null) {
+                val requireGenuine = !BuildConfig.DEBUG && !FocalConfig.isDemoMode
+                val gate = NfcGuardGate(pubKey, requireGenuine = requireGenuine)
+                val localResult = gate.checkLocal(cardScan)
+
+                if (!localResult.passed) {
+                    val failMsg = localResult.failed?.detail ?: "Card verification failed"
+                    lastErrorMessage = "NFC Guard denied: $failMsg"
+                    android.util.Log.w("AndroidNfcManager", "Local gate failed: ${localResult.failed?.name} - $failMsg")
+                    return false
+                }
+
+                // Check 1 (NXP originality), Check 2 (P-256 signature), Check 3 (UID binding) passed!
+                val serialStr = cardPayload.serial.toString()
+                val hexUid = CardCrypto.toHex(cardScan.uid)
+                detectedPreWrittenToken = serialStr
+
+                val child = repo.children.firstOrNull()
+                val pairedCard = repo.cards.find { card ->
+                    (child != null && card.cardId.equals(child.pairedCardId, ignoreCase = true)) ||
+                    card.cardId.contains(serialStr, ignoreCase = true) ||
+                    card.token.equals(serialStr, ignoreCase = true) ||
+                    card.nfcUid.replace(":", "").equals(hexUid, ignoreCase = true) ||
+                    card.nfcUid.equals(uidString, ignoreCase = true)
+                } ?: run {
+                    if (child != null && (child.pairedCardId == null || FocalConfig.isDemoMode)) {
+                        val newCard = repo.registerCardToParent(serialStr, child.controllerId, "Parent")
+                        repo.assignCardToChild(newCard.cardId, child.id)
+                        newCard
+                    } else null
+                }
+
+                if (pairedCard == null) {
+                    lastErrorMessage = "This card isn't paired to you (Serial: $serialStr)."
+                    return false
+                }
+
+                return if (engine.sessionState == SessionState.ACTIVE) {
+                    engine.endFocus(TriggerType.NFC, pairedCard.cardId)
+                    playSuccessFeedback(context)
+                    true
+                } else {
+                    val defaultPolicy = repo.policies.firstOrNull() ?: return false
+                    val startRes = engine.startFocus(TriggerType.NFC, pairedCard.cardId, defaultPolicy)
+                    if (startRes.isSuccess) {
+                        playSuccessFeedback(context)
+                        true
+                    } else {
+                        lastErrorMessage = startRes.exceptionOrNull()?.message ?: "Unable to start session."
+                        false
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback for Legacy / Demo Test Cards
         val scannedToken = readTokenFromTag(tag)
         if (scannedToken != null) {
             detectedPreWrittenToken = scannedToken
         }
 
-        // 3. Regular Focus Trigger: Verify token matches child's assigned card
         val tokenToMatch = scannedToken ?: uidString
         val child = repo.children.firstOrNull()
         val pairedCard = repo.cards.find { it.cardId == child?.pairedCardId }
 
         val isPaired = pairedCard != null && (
                 pairedCard.token.equals(tokenToMatch, ignoreCase = true) ||
-                pairedCard.nfcUid.equals(uidString, ignoreCase = true)
+                pairedCard.nfcUid.equals(uidString, ignoreCase = true) ||
+                pairedCard.nfcUid.replace(":", "").equals(uidString.replace(":", ""), ignoreCase = true)
         )
 
         if (engine.sessionState == SessionState.ACTIVE) {

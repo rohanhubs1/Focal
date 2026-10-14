@@ -36,10 +36,12 @@ import java.util.concurrent.Executors
 @Composable
 actual fun PlatformCameraScanner(
     modifier: Modifier,
+    torchEnabled: Boolean,
     onQrDetected: (String) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    var boundCamera by remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -105,8 +107,19 @@ actual fun PlatformCameraScanner(
         val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
         val barcodeScanner = remember { BarcodeScanning.getClient() }
 
+        LaunchedEffect(torchEnabled, boundCamera) {
+            try {
+                if (boundCamera?.cameraInfo?.hasFlashUnit() == true) {
+                    boundCamera?.cameraControl?.enableTorch(torchEnabled)
+                }
+            } catch (_: Exception) {}
+        }
+
         DisposableEffect(Unit) {
             onDispose {
+                try {
+                    boundCamera?.cameraControl?.enableTorch(false)
+                } catch (_: Exception) {}
                 cameraExecutor.shutdown()
                 barcodeScanner.close()
             }
@@ -141,12 +154,13 @@ actual fun PlatformCameraScanner(
 
                     try {
                         cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(
+                        val cam = cameraProvider.bindToLifecycle(
                             lifecycleOwner,
                             cameraSelector,
                             preview,
                             imageAnalyzer
                         )
+                        boundCamera = cam
                     } catch (_: Exception) {}
                 }, ContextCompat.getMainExecutor(ctx))
 

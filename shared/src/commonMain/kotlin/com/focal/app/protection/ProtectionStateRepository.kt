@@ -111,4 +111,11 @@ class ProtectionStateRepository private constructor() {
         }
         _state.value = _state.value.copy(lastDecisions = currentLogs)
     }
+
+    fun reset() {
+        _state.value = ProtectionState()
+        FocalLocalStorage.clear()
+    }
 }
+
+

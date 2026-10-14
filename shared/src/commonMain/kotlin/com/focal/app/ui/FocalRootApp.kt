@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,25 +31,29 @@ import com.focal.app.theme.FocalTheme
 import com.focal.app.ui.admin.AdminDashboardScreen
 import com.focal.app.ui.auth.*
 import com.focal.app.ui.child.*
+import com.focal.app.ui.child.components.ComponentGalleryScreen
+import com.focal.app.ui.child.pairing.*
+import com.focal.app.ui.child.protection.*
+import com.focal.app.pairing.*
 import com.focal.app.ui.components.*
 import com.focal.app.ui.controller.*
 
 enum class AppScreenState {
     SPLASH,
-    ONBOARDING,
-    ROLE_SELECTION,
-    PERSONALIZATION_PARENT,
-    PERSONALIZATION_CHILD,
+    HOW_IT_WORKS,
+    WELCOME,
     PARENT_LOGIN,
     PARENT_SIGN_UP,
-    PARENT_FORGOT_PASSWORD,
-    PARENT_PERMISSIONS,
-    PARENT_ADD_CHILD,
-    PARENT_PAIR_CHILD,
-    CHILD_PAIRING,
+    FOCUS_METHOD,
+    CHILD_PAIR_CONNECT,
+    CHILD_SCAN_QR,
+    CHILD_WAITING_APPROVAL,
+    CHILD_PAIRED_SUCCESS,
+    CHILD_PROTECTION_DISCLOSURE,
+    CHILD_PROTECTION_CHECKLIST,
+    CHILD_SETUP_ALL_SET,
     PROMINENT_DISCLOSURE,
     CHILD_PERMISSIONS,
-    CARD_SETUP,
     PROTECTION_OFF,
     MAIN_APP
 }
@@ -59,6 +65,8 @@ fun FocalRootApp(
 ) {
     val screenBackStack = remember { mutableStateListOf(AppScreenState.SPLASH) }
     var screenState by remember { mutableStateOf(AppScreenState.SPLASH) }
+    var activePairRequest by remember { mutableStateOf<PairRequest?>(null) }
+    var pairErrorNotice by remember { mutableStateOf<String?>(null) }
 
     fun navigateToScreen(target: AppScreenState, clearHistory: Boolean = false) {
         if (clearHistory) {
@@ -88,37 +96,38 @@ fun FocalRootApp(
     }
 
     fun computeStartScreen(): AppScreenState {
-        val onboardingDone = FocalLocalStorage.getBoolean("KEY_ONBOARDING_DONE", false)
-        if (!onboardingDone) return AppScreenState.ONBOARDING
-
         val role = FocalLocalStorage.getString("KEY_SELECTED_ROLE", "")
-        if (role.isEmpty()) return AppScreenState.ROLE_SELECTION
+        if (role.isEmpty()) {
+            val howItWorksSeen = FocalLocalStorage.getBoolean("KEY_HOW_IT_WORKS_SEEN", false)
+            return if (!howItWorksSeen) AppScreenState.HOW_IT_WORKS else AppScreenState.WELCOME
+        }
 
-        val personalizationDone = FocalLocalStorage.getBoolean("KEY_PERSONALIZATION_DONE", false)
         val authDone = FocalLocalStorage.getBoolean("KEY_AUTH_DONE", false)
 
         if (role == "PARENT") {
             if (!authDone) {
-                if (!personalizationDone) return AppScreenState.PERSONALIZATION_PARENT
                 return AppScreenState.PARENT_LOGIN
             }
-            val parentPermsAsked = FocalLocalStorage.getBoolean("KEY_PARENT_NOTIFICATIONS_ASKED", false)
-            if (!parentPermsAsked) return AppScreenState.PARENT_PERMISSIONS
+            val focusMethodChosen = FocalLocalStorage.getBoolean("KEY_FOCUS_METHOD_CHOSEN", false)
+            if (!focusMethodChosen) {
+                return AppScreenState.FOCUS_METHOD
+            }
             return AppScreenState.MAIN_APP
         } else { // CHILD
             if (!authDone) {
-                if (!personalizationDone) return AppScreenState.PERSONALIZATION_CHILD
-                return AppScreenState.CHILD_PAIRING
+                val pending = com.focal.app.pairing.PairingRepository.instance.getPendingRequest()
+                if (pending != null) {
+                    return AppScreenState.CHILD_WAITING_APPROVAL
+                }
+                return AppScreenState.CHILD_PAIR_CONNECT
             }
             val setupDone = FocalLocalStorage.getBoolean("KEY_SETUP_DONE", false)
-            val allRequiredOn = checkAllChildPermissionsOn()
             if (!setupDone) {
-                val disclosureAgreed = FocalLocalStorage.getBoolean("KEY_DISCLOSURE_AGREED", false)
-                if (!disclosureAgreed) return AppScreenState.PROMINENT_DISCLOSURE
-                if (!allRequiredOn) return AppScreenState.CHILD_PERMISSIONS
-                return AppScreenState.CARD_SETUP
+                val disclosureAgreed = FocalLocalStorage.getBoolean("KEY_ACCESSIBILITY_DISCLOSURE_AGREED", false) ||
+                        FocalLocalStorage.getBoolean("KEY_DISCLOSURE_AGREED", false)
+                if (!disclosureAgreed) return AppScreenState.CHILD_PROTECTION_DISCLOSURE
+                return AppScreenState.CHILD_PROTECTION_CHECKLIST
             }
-            if (!allRequiredOn) return AppScreenState.PROTECTION_OFF
             return AppScreenState.MAIN_APP
         }
     }
@@ -164,12 +173,20 @@ fun FocalRootApp(
     var showQrScanner by remember { mutableStateOf(false) }
     var showActiveFocusScreen by remember { mutableStateOf(false) }
     var showAddChildModal by remember { mutableStateOf(false) }
-    var showCreatePolicyModal by remember { mutableStateOf(false) }
+    var isAddChildFlowActive by remember { mutableStateOf(false) }
+    var connectPhoneChildId by remember { mutableStateOf<String?>(null) }
+    var isPolicyEditingActive by remember { mutableStateOf(false) }
+    var openNewPolicyCounter by remember { mutableIntStateOf(0) }
+    var policyBackTrigger by remember { mutableIntStateOf(0) }
+    var isProfileSubScreenActive by remember { mutableStateOf(false) }
+    var profileBackTrigger by remember { mutableIntStateOf(0) }
     var showPermissionsModal by remember { mutableStateOf(false) }
     var generatedFocusQrModal by remember { mutableStateOf<Pair<QrToken, String>?>(null) }
     var showNotificationsModal by remember { mutableStateOf(false) }
     var showComponentGallery by remember { mutableStateOf(false) }
     var showRoleSwitcherModal by remember { mutableStateOf(false) }
+    var childSubScreen by remember { mutableStateOf<com.focal.app.ui.child.ChildSubScreen?>(null) }
+    var parentActivityFilter by remember { mutableStateOf<String?>(null) }
 
     val currentUser = repository.currentUser
 
@@ -178,7 +195,9 @@ fun FocalRootApp(
         screenBackStack.size,
         showNotificationsModal,
         generatedFocusQrModal,
-        showCreatePolicyModal,
+        isPolicyEditingActive,
+        isAddChildFlowActive,
+        isProfileSubScreenActive,
         showAddChildModal,
         showPermissionsModal,
         showQrScanner,
@@ -188,10 +207,14 @@ fun FocalRootApp(
         currentUser.role,
         childTabHistory.size,
         controllerTabHistory.size,
-        showComponentGallery
+        showComponentGallery,
+        childSubScreen,
+        repository.showParentUnlockScreen
     ) {
-        if (showComponentGallery || showNotificationsModal || generatedFocusQrModal != null ||
-            showCreatePolicyModal || showAddChildModal || showPermissionsModal ||
+        if (childSubScreen != null || repository.showParentUnlockScreen || isPolicyEditingActive || isAddChildFlowActive || isProfileSubScreenActive) {
+            true
+        } else if (showComponentGallery || showNotificationsModal || generatedFocusQrModal != null ||
+            showAddChildModal || showPermissionsModal ||
             showQrScanner || showNfcScanner || showActiveFocusScreen
         ) {
             true
@@ -212,10 +235,17 @@ fun FocalRootApp(
 
     val handleBack: () -> Unit = {
         when {
+            childSubScreen != null -> childSubScreen = null
+            repository.showParentUnlockScreen -> repository.showParentUnlockScreen = false
+            isPolicyEditingActive -> policyBackTrigger++
+            isAddChildFlowActive -> {
+                isAddChildFlowActive = false
+                connectPhoneChildId = null
+            }
+            isProfileSubScreenActive -> profileBackTrigger++
             showComponentGallery -> showComponentGallery = false
             showNotificationsModal -> showNotificationsModal = false
             generatedFocusQrModal != null -> generatedFocusQrModal = null
-            showCreatePolicyModal -> showCreatePolicyModal = false
             showAddChildModal -> showAddChildModal = false
             showPermissionsModal -> showPermissionsModal = false
             showQrScanner -> showQrScanner = false
@@ -272,57 +302,35 @@ fun FocalRootApp(
         } else {
             Scaffold(
                 containerColor = FocalColors.Background,
-                contentWindowInsets = WindowInsets.systemBars,
+                contentWindowInsets = if (currentUser.role == UserRole.CHILD || currentUser.role == UserRole.CONTROLLER) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars,
                 topBar = {
-                    if (screenState == AppScreenState.MAIN_APP) {
+                    if (screenState == AppScreenState.MAIN_APP && currentUser.role == UserRole.ADMIN) {
                         FocalTopBar(
-                            title = when (currentUser.role) {
-                                UserRole.CHILD -> when (childTabIndex) {
-                                    0 -> "FOCAL"
-                                    1 -> "Focus Schedules"
-                                    2 -> "Screen Insights"
-                                    else -> "Profile"
-                                }
-                                UserRole.CONTROLLER -> when (controllerTabIndex) {
-                                    0 -> "FOCAL Controller"
-                                    1 -> "Children Directory"
-                                    2 -> "Focus Policies"
-                                    else -> "Parent Profile"
-                                }
-                                UserRole.ADMIN -> "Admin Dashboard"
-                            },
-                            onBackClick = if (selectedChildForManagement != null) {
-                                { selectedChildForManagement = null }
-                            } else null
+                            title = "Admin Dashboard",
+                            onBackClick = null
                         )
                     }
                 },
                 bottomBar = {
-                    if (screenState == AppScreenState.MAIN_APP && !showActiveFocusScreen) {
+                    if (screenState == AppScreenState.MAIN_APP && (!showActiveFocusScreen || currentUser.role == UserRole.CHILD)) {
                         when (currentUser.role) {
                             UserRole.CHILD -> {
-                                FocalBottomNav(
-                                    items = listOf(
-                                        FocalNavItem("Home", FocalIcons.Home),
-                                        FocalNavItem("Schedules", FocalIcons.Calendar),
-                                        FocalNavItem("Insights", FocalIcons.Chart),
-                                        FocalNavItem("Profile", FocalIcons.Smartphone)
-                                    ),
-                                    selectedIndex = childTabIndex,
-                                    onSelectTab = { selectChildTab(it) }
-                                )
+                                if (childSubScreen == null && !repository.showParentUnlockScreen) {
+                                    com.focal.app.ui.child.components.ChildBottomNav(
+                                        selectedTab = com.focal.app.ui.child.components.ChildTab.entries[childTabIndex],
+                                        onTabSelected = { selectChildTab(it.ordinal) },
+                                        modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
+                                    )
+                                }
                             }
                             UserRole.CONTROLLER -> {
-                                FocalBottomNav(
-                                    items = listOf(
-                                        FocalNavItem("Home", FocalIcons.Home),
-                                        FocalNavItem("Children", FocalIcons.Users),
-                                        FocalNavItem("Policies", FocalIcons.Shield),
-                                        FocalNavItem("Profile", FocalIcons.Smartphone)
-                                    ),
-                                    selectedIndex = controllerTabIndex,
-                                    onSelectTab = { selectControllerTab(it) }
-                                )
+                                if (selectedChildForManagement == null && !isPolicyEditingActive && !isAddChildFlowActive && !isProfileSubScreenActive) {
+                                    com.focal.app.ui.components.ParentBottomNav(
+                                        selectedTab = com.focal.app.ui.components.ParentTab.entries.getOrElse(controllerTabIndex) { com.focal.app.ui.components.ParentTab.HOME },
+                                        onTabSelected = { selectControllerTab(it.ordinal) },
+                                        modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
+                                    )
+                                }
                             }
                             UserRole.ADMIN -> {}
                         }
@@ -346,246 +354,321 @@ fun FocalRootApp(
                             )
                         }
 
-                        AppScreenState.ONBOARDING -> {
-                            OnboardingFlowScreen(
-                                onOnboardingFinished = {
-                                    FocalLocalStorage.saveBoolean("KEY_ONBOARDING_DONE", true)
-                                    navigateToScreen(AppScreenState.ROLE_SELECTION)
+                        AppScreenState.HOW_IT_WORKS -> {
+                            HowItWorksScreen(
+                                onGetStarted = {
+                                    FocalLocalStorage.saveBoolean("KEY_HOW_IT_WORKS_SEEN", true)
+                                    navigateToScreen(AppScreenState.WELCOME)
                                 },
                                 onSkip = {
-                                    FocalLocalStorage.saveBoolean("KEY_ONBOARDING_DONE", true)
-                                    navigateToScreen(AppScreenState.ROLE_SELECTION)
+                                    FocalLocalStorage.saveBoolean("KEY_HOW_IT_WORKS_SEEN", true)
+                                    navigateToScreen(AppScreenState.WELCOME)
                                 }
                             )
                         }
 
-                        AppScreenState.ROLE_SELECTION -> {
-                            RoleSelectionScreen(
-                                onRoleConfirmed = { selectedRole ->
-                                    repository.switchUserRole(selectedRole)
-                                    if (selectedRole == UserRole.CONTROLLER) {
-                                        FocalLocalStorage.saveString("KEY_SELECTED_ROLE", "PARENT")
-                                        val pDone = FocalLocalStorage.getBoolean("KEY_PERSONALIZATION_DONE", false)
-                                        navigateToScreen(if (pDone) AppScreenState.PARENT_LOGIN else AppScreenState.PERSONALIZATION_PARENT)
-                                    } else {
-                                        FocalLocalStorage.saveString("KEY_SELECTED_ROLE", "CHILD")
-                                        val pDone = FocalLocalStorage.getBoolean("KEY_PERSONALIZATION_DONE", false)
-                                        navigateToScreen(if (pDone) AppScreenState.CHILD_PAIRING else AppScreenState.PERSONALIZATION_CHILD)
-                                    }
+                        AppScreenState.WELCOME -> {
+                            WelcomeScreen(
+                                onParentSelected = {
+                                    navigateToScreen(AppScreenState.PARENT_SIGN_UP)
                                 },
-                                onDirectSignInClick = {
-                                    FocalLocalStorage.saveString("KEY_SELECTED_ROLE", "PARENT")
-                                    repository.switchUserRole(UserRole.CONTROLLER)
+                                onChildSelected = {
+                                    repository.switchUserRole(UserRole.CHILD)
+                                    navigateToScreen(AppScreenState.CHILD_PAIR_CONNECT)
+                                },
+                                onNavigateToLogin = {
                                     navigateToScreen(AppScreenState.PARENT_LOGIN)
                                 }
                             )
                         }
 
-                        AppScreenState.PERSONALIZATION_PARENT -> {
-                            ParentPersonalizationFlow(
-                                onComplete = { navigateToScreen(AppScreenState.PARENT_SIGN_UP) },
-                                onBackToRoleSelect = { navigateToScreen(AppScreenState.ROLE_SELECTION) }
-                            )
-                        }
-
-                        AppScreenState.PERSONALIZATION_CHILD -> {
-                            ChildPersonalizationFlow(
-                                onComplete = { navigateToScreen(AppScreenState.CHILD_PAIRING) },
-                                onBackToRoleSelect = { navigateToScreen(AppScreenState.ROLE_SELECTION) }
+                        AppScreenState.PARENT_SIGN_UP -> {
+                            CreateAccountScreen(
+                                onAccountCreated = {
+                                    navigateToScreen(AppScreenState.FOCUS_METHOD)
+                                },
+                                onNavigateToLogin = {
+                                    navigateToScreen(AppScreenState.PARENT_LOGIN)
+                                },
+                                onBack = {
+                                    navigateToScreen(AppScreenState.WELCOME)
+                                }
                             )
                         }
 
                         AppScreenState.PARENT_LOGIN -> {
-                            ParentLoginScreen(
+                            LoginScreen(
                                 onLoginSuccess = {
-                                    FocalLocalStorage.saveBoolean("KEY_AUTH_DONE", true)
-                                    val asked = FocalLocalStorage.getBoolean("KEY_PARENT_NOTIFICATIONS_ASKED", false)
-                                    if (!asked) {
-                                        navigateToScreen(AppScreenState.PARENT_PERMISSIONS)
+                                    val focusMethodChosen = FocalLocalStorage.getBoolean("KEY_FOCUS_METHOD_CHOSEN", false)
+                                    if (!focusMethodChosen) {
+                                        navigateToScreen(AppScreenState.FOCUS_METHOD)
                                     } else {
                                         navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
                                     }
                                 },
-                                onNavigateToSignUp = { navigateToScreen(AppScreenState.PARENT_SIGN_UP) },
-                                onNavigateToForgotPassword = { navigateToScreen(AppScreenState.PARENT_FORGOT_PASSWORD) },
-                                repository = repository
-                            )
-                        }
-
-                        AppScreenState.PARENT_SIGN_UP -> {
-                            ParentSignUpScreen(
-                                onSignUpSuccess = {
-                                    FocalLocalStorage.saveBoolean("KEY_AUTH_DONE", true)
-                                    val asked = FocalLocalStorage.getBoolean("KEY_PARENT_NOTIFICATIONS_ASKED", false)
-                                    if (!asked) {
-                                        navigateToScreen(AppScreenState.PARENT_PERMISSIONS)
-                                    } else {
-                                        navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
-                                    }
+                                onNavigateToSignUp = {
+                                    navigateToScreen(AppScreenState.PARENT_SIGN_UP)
                                 },
-                                onNavigateToLogin = { navigateToScreen(AppScreenState.PARENT_LOGIN) },
-                                repository = repository
+                                onNavigateToChildPair = {
+                                    repository.switchUserRole(UserRole.CHILD)
+                                    navigateToScreen(AppScreenState.CHILD_PAIR_CONNECT)
+                                },
+                                onBack = {
+                                    navigateToScreen(AppScreenState.WELCOME)
+                                }
                             )
                         }
 
-                        AppScreenState.PARENT_FORGOT_PASSWORD -> {
-                            ParentForgotPasswordScreen(
-                                onBackToLogin = { navigateToScreen(AppScreenState.PARENT_LOGIN) }
-                            )
-                        }
-
-                        AppScreenState.PARENT_PERMISSIONS -> {
-                            ParentPermissionsScreen(
-                                onPermissionsComplete = {
-                                    FocalLocalStorage.saveBoolean("KEY_PARENT_NOTIFICATIONS_ASKED", true)
+                        AppScreenState.FOCUS_METHOD -> {
+                            FocusMethodScreen(
+                                onNavigateToParentHome = {
                                     navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
                                 },
-                                onSkipWithWarning = {
-                                    FocalLocalStorage.saveBoolean("KEY_PARENT_NOTIFICATIONS_ASKED", true)
+                                onOpenFocusTab = {
+                                    selectControllerTab(2)
+                                    navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                                },
+                                onCloseToParentHome = {
                                     navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
                                 }
                             )
                         }
 
-                        AppScreenState.PARENT_ADD_CHILD -> {
-                            ParentAddChildScreen(
-                                onChildAdded = { name ->
-                                    createdChildNameForPairing = name
-                                    navigateToScreen(AppScreenState.PARENT_PAIR_CHILD)
+                        AppScreenState.CHILD_PAIR_CONNECT -> {
+                            PairScreen(
+                                onBack = { navigateToScreen(AppScreenState.WELCOME) },
+                                onScanQrClick = { navigateToScreen(AppScreenState.CHILD_SCAN_QR) },
+                                onPairSuccess = { req ->
+                                    activePairRequest = req
+                                    pairErrorNotice = null
+                                    navigateToScreen(AppScreenState.CHILD_WAITING_APPROVAL)
+                                },
+                                initialError = pairErrorNotice
+                            )
+                        }
+
+                        AppScreenState.CHILD_SCAN_QR -> {
+                            ScanParentQrScreen(
+                                onBack = { navigateToScreen(AppScreenState.CHILD_PAIR_CONNECT) },
+                                onEnterCodeClick = { navigateToScreen(AppScreenState.CHILD_PAIR_CONNECT) },
+                                onQrRedeemed = { req ->
+                                    activePairRequest = req
+                                    pairErrorNotice = null
+                                    navigateToScreen(AppScreenState.CHILD_WAITING_APPROVAL)
                                 }
                             )
                         }
 
-                        AppScreenState.PARENT_PAIR_CHILD -> {
-                            ParentPairChildScreen(
-                                childName = createdChildNameForPairing,
-                                onPairingComplete = {
-                                    navigateToScreen(AppScreenState.CARD_SETUP)
+                        AppScreenState.CHILD_WAITING_APPROVAL -> {
+                            val currentReq = activePairRequest ?: com.focal.app.pairing.PairingRepository.instance.getPendingRequest()
+                            if (currentReq != null) {
+                                WaitingApprovalScreen(
+                                    request = currentReq,
+                                    onCancel = {
+                                        activePairRequest = null
+                                        navigateToScreen(AppScreenState.CHILD_PAIR_CONNECT)
+                                    },
+                                    onApproved = { approvedReq ->
+                                        activePairRequest = approvedReq
+                                        pairErrorNotice = null
+                                        navigateToScreen(AppScreenState.CHILD_PAIRED_SUCCESS)
+                                    },
+                                    onDeclinedOrExpired = { errorMsg ->
+                                        activePairRequest = null
+                                        pairErrorNotice = errorMsg
+                                        navigateToScreen(AppScreenState.CHILD_PAIR_CONNECT)
+                                    }
+                                )
+                            } else {
+                                LaunchedEffect(Unit) {
+                                    navigateToScreen(AppScreenState.CHILD_PAIR_CONNECT)
+                                }
+                            }
+                        }
+
+                        AppScreenState.CHILD_PAIRED_SUCCESS -> {
+                            val currentReq = activePairRequest ?: com.focal.app.pairing.PairRequest(
+                                id = "req_done",
+                                code = "000000",
+                                parentId = "parent_01",
+                                parentName = repository.controllerUser.name.ifBlank { "Priya Sharma" },
+                                parentInitials = "PS",
+                                childId = "child_01",
+                                childName = repository.currentUser.name.ifBlank { "Aarav" },
+                                childInitials = "AR",
+                                childGrade = "Class 10 · Student",
+                                pairedCardId = "FC0001",
+                                expiresAtMs = 0L,
+                                state = com.focal.app.pairing.PairState.APPROVED
+                            )
+                            PairedSuccessScreen(
+                                request = currentReq,
+                                onSetupProtection = {
+                                    navigateToScreen(AppScreenState.CHILD_PROTECTION_DISCLOSURE)
                                 }
                             )
                         }
 
-                        AppScreenState.CHILD_PAIRING -> {
-                            ChildPairingScreen(
-                                onPairingSuccess = {
-                                    FocalLocalStorage.saveBoolean("KEY_AUTH_DONE", true)
-                                    navigateToScreen(AppScreenState.PROMINENT_DISCLOSURE)
-                                }
-                            )
-                        }
-
+                        AppScreenState.CHILD_PROTECTION_DISCLOSURE,
                         AppScreenState.PROMINENT_DISCLOSURE -> {
-                            ProminentDisclosureScreen(
-                                onAgree = {
-                                    FocalLocalStorage.saveBoolean("KEY_DISCLOSURE_AGREED", true)
-                                    navigateToScreen(AppScreenState.CHILD_PERMISSIONS)
+                            AccessibilityDisclosureScreen(
+                                onAgreeAndContinue = {
+                                    navigateToScreen(AppScreenState.CHILD_PROTECTION_CHECKLIST)
+                                    PlatformPermissionsHelper.openAccessibilitySettings()
                                 },
-                                onCancel = {
-                                    navigateToScreen(AppScreenState.ROLE_SELECTION)
+                                onNotNow = {
+                                    navigateToScreen(AppScreenState.CHILD_PROTECTION_CHECKLIST)
                                 }
                             )
                         }
 
+                        AppScreenState.CHILD_PROTECTION_CHECKLIST,
                         AppScreenState.CHILD_PERMISSIONS -> {
-                            ChildPermissionsSetupScreen(
-                                onPermissionsComplete = { navigateToScreen(AppScreenState.CARD_SETUP) }
+                            ProtectionSetupScreen(
+                                onAllSet = {
+                                    navigateToScreen(AppScreenState.CHILD_SETUP_ALL_SET)
+                                },
+                                onShowDisclosure = {
+                                    navigateToScreen(AppScreenState.CHILD_PROTECTION_DISCLOSURE)
+                                },
+                                onBack = {
+                                    navigateToScreen(AppScreenState.CHILD_PROTECTION_DISCLOSURE)
+                                }
                             )
                         }
 
-                        AppScreenState.CARD_SETUP -> {
-                            CardSetupScreen(
-                                onSetupFinished = {
-                                    FocalLocalStorage.saveBoolean("KEY_SETUP_DONE", true)
-                                    com.focal.app.protection.ProtectionStateRepository.instance.updateSetupComplete(true)
-                                    navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
-                                },
-                                onSkip = {
-                                    FocalLocalStorage.saveBoolean("KEY_SETUP_DONE", true)
-                                    com.focal.app.protection.ProtectionStateRepository.instance.updateSetupComplete(true)
+                        AppScreenState.CHILD_SETUP_ALL_SET -> {
+                            SetupCompleteScreen(
+                                onGoToHome = {
                                     navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
                                 }
                             )
                         }
 
                         AppScreenState.PROTECTION_OFF -> {
-                            ProtectionOffScreen(
-                                onGoToReadOnlyHome = { navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true) }
-                            )
+                            LaunchedEffect(Unit) {
+                                navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                            }
                         }
 
                         AppScreenState.MAIN_APP -> {
                             when (currentUser.role) {
                                 UserRole.CHILD -> {
-                                    when (childTabIndex) {
-                                        0 -> ChildDashboardScreen(
-                                            onStartFocusClick = {
-                                                if (currentUser.planType == PlanType.NFC) {
-                                                    showNfcScanner = true
-                                                } else {
-                                                    showQrScanner = true
-                                                }
-                                            },
-                                            onNfcTapClick = { showNfcScanner = true },
-                                            onQrScanClick = { showQrScanner = true },
-                                            onViewActiveSession = { showActiveFocusScreen = true },
-                                            onViewInsights = { selectChildTab(2) },
-                                            onOpenPermissions = { navigateToScreen(AppScreenState.CHILD_PERMISSIONS) }
-                                        )
-                                        1 -> SchedulesScreen()
-                                        2 -> InsightsScreen()
-                                        3 -> ChildProfileScreen(
-                                            onLogout = { navigateToScreen(AppScreenState.ROLE_SELECTION, clearHistory = true) },
-                                            onOpenPermissions = { navigateToScreen(AppScreenState.CHILD_PERMISSIONS) },
-                                            onOpenNfcTap = { showNfcScanner = true }
-                                        )
+                                    if (childSubScreen != null) {
+                                        when (childSubScreen) {
+                                            com.focal.app.ui.child.ChildSubScreen.CONNECTED_PARENT -> com.focal.app.ui.child.ConnectedParentScreen(onBack = { childSubScreen = null })
+                                            com.focal.app.ui.child.ChildSubScreen.FOCAL_CARD -> com.focal.app.ui.child.FocalCardScreen(onBack = { childSubScreen = null })
+                                            com.focal.app.ui.child.ChildSubScreen.PROTECTION -> com.focal.app.ui.child.ProtectionScreen(onBack = { childSubScreen = null })
+                                            com.focal.app.ui.child.ChildSubScreen.NOTIFICATIONS -> com.focal.app.ui.child.NotificationsScreen(onBack = { childSubScreen = null })
+                                            com.focal.app.ui.child.ChildSubScreen.HELP -> com.focal.app.ui.child.HelpScreen(onBack = { childSubScreen = null })
+                                            com.focal.app.ui.child.ChildSubScreen.PRIVACY -> com.focal.app.ui.child.PrivacyScreen(onBack = { childSubScreen = null })
+                                            com.focal.app.ui.child.ChildSubScreen.ABOUT -> com.focal.app.ui.child.AboutScreen(onBack = { childSubScreen = null })
+                                            com.focal.app.ui.child.ChildSubScreen.PARENT_UNLOCK -> com.focal.app.ui.child.ParentUnlockScreen(
+                                                onClose = { childSubScreen = null },
+                                                onUnlockSuccess = { childSubScreen = null },
+                                                repository = repository
+                                            )
+                                            null -> {}
+                                        }
+                                    } else {
+                                        when (childTabIndex) {
+                                            0 -> ChildDashboardScreen(
+                                                onStartFocusClick = {
+                                                    if (currentUser.planType == PlanType.NFC) {
+                                                        showNfcScanner = true
+                                                    } else {
+                                                        showQrScanner = true
+                                                    }
+                                                },
+                                                onNfcTapClick = { showNfcScanner = true },
+                                                onQrScanClick = { showQrScanner = true },
+                                                onViewActiveSession = { showActiveFocusScreen = true },
+                                                onViewInsights = { selectChildTab(2) },
+                                                onOpenPermissions = { childSubScreen = com.focal.app.ui.child.ChildSubScreen.PROTECTION }
+                                            )
+                                            1 -> SchedulesScreen()
+                                            2 -> InsightsScreen()
+                                            3 -> com.focal.app.ui.child.ChildProfileScreen(
+                                                onNavigateSubScreen = { childSubScreen = it },
+                                                repository = repository
+                                            )
+                                        }
                                     }
                                 }
 
                                 UserRole.CONTROLLER -> {
-                                    if (selectedChildForManagement != null) {
-                                        ChildManagementScreen(
+                                    if (isAddChildFlowActive) {
+                                        com.focal.app.ui.controller.AddChildRootFlow(
+                                            initialChildId = connectPhoneChildId,
+                                            onDismiss = {
+                                                isAddChildFlowActive = false
+                                                connectPhoneChildId = null
+                                            },
+                                            onChildConnected = { child ->
+                                                isAddChildFlowActive = false
+                                                connectPhoneChildId = null
+                                                selectedChildForManagement = child
+                                            },
+                                            repository = repository,
+                                            pairingRepository = com.focal.app.pairing.PairingRepository.instance
+                                        )
+                                    } else if (selectedChildForManagement != null) {
+                                        ChildDetailScreen(
                                             child = selectedChildForManagement!!,
                                             onBack = { selectedChildForManagement = null },
-                                            onCreateFocus = { showCreatePolicyModal = true },
-                                            onGenerateQr = {
-                                                val policy = repository.policies.first()
-                                                val qr = repository.generateFocusQr(
-                                                    childId = selectedChildForManagement!!.id,
-                                                    policyId = policy.id,
-                                                    policyTitle = "${policy.name} (${policy.durationMinutes / 60} Hours)",
-                                                    durationMinutes = policy.durationMinutes
-                                                )
-                                                generatedFocusQrModal = qr to selectedChildForManagement!!.name
-                                            }
+                                            onConnectPhone = {
+                                                connectPhoneChildId = selectedChildForManagement!!.id
+                                                isAddChildFlowActive = true
+                                            },
+                                            repository = repository
                                         )
                                     } else {
                                         when (controllerTabIndex) {
-                                            0 -> ControllerDashboardScreen(
+                                            0 -> ParentHomeScreen(
                                                 onChildSelected = { selectedChildForManagement = it },
-                                                onAddChildClick = { showAddChildModal = true },
-                                                onCreatePolicyClick = { showCreatePolicyModal = true },
-                                                onOpenPermissions = { navigateToScreen(AppScreenState.PARENT_PERMISSIONS) }
+                                                onAddChildClick = {
+                                                    connectPhoneChildId = null
+                                                    isAddChildFlowActive = true
+                                                },
+                                                onCreatePolicyClick = {
+                                                    selectControllerTab(1)
+                                                    openNewPolicyCounter++
+                                                },
+                                                onOpenPermissions = { PlatformPermissionsHelper.openNotificationSettings() },
+                                                onOpenActivityTab = { filter ->
+                                                    parentActivityFilter = filter
+                                                    selectControllerTab(3)
+                                                },
+                                                onOpenFocusTab = { selectControllerTab(2) },
+                                                onStartNowClick = { selectControllerTab(2) }
                                             )
-                                            1 -> ChildrenDirectoryScreen(
-                                                onChildSelected = { selectedChildForManagement = it },
-                                                onAddChildClick = { showAddChildModal = true }
+                                            1 -> com.focal.app.ui.controller.ParentPoliciesRootFlow(
+                                                onEditingStateChanged = { isPolicyEditingActive = it },
+                                                triggerNewPolicy = openNewPolicyCounter,
+                                                backTrigger = policyBackTrigger,
+                                                repository = repository
                                             )
-                                            2 -> ControllerFocusPoliciesScreen(
-                                                onCreatePolicyClick = { showCreatePolicyModal = true },
-                                                onGenerateQr = { policy ->
-                                                    val child = repository.childrenList.firstOrNull()
-                                                    val qr = repository.generateFocusQr(
-                                                        childId = child?.id ?: "child_1",
-                                                        policyId = policy.id,
-                                                        policyTitle = "${policy.name} (${policy.durationMinutes / 60} Hours)",
-                                                        durationMinutes = policy.durationMinutes
-                                                    )
-                                                    generatedFocusQrModal = qr to (child?.name ?: "Child")
-                                                }
+                                            2 -> com.focal.app.ui.controller.ParentFocusTabScreen(
+                                                onAddChildClick = {
+                                                    connectPhoneChildId = null
+                                                    isAddChildFlowActive = true
+                                                },
+                                                repository = repository
                                             )
-                                            3 -> ControllerProfileScreen(
-                                                onLogout = { navigateToScreen(AppScreenState.ROLE_SELECTION, clearHistory = true) },
-                                                onOpenChildrenTab = { selectControllerTab(1) },
+                                            3 -> com.focal.app.ui.controller.ParentActivityScreen(
+                                                initialFilter = parentActivityFilter,
+                                                repository = repository
+                                            )
+                                            4 -> com.focal.app.ui.controller.ParentProfileRootFlow(
+                                                onLogout = { navigateToScreen(AppScreenState.WELCOME, clearHistory = true) },
+                                                onSelectChild = { child -> selectedChildForManagement = child },
+                                                onAddChild = {
+                                                    connectPhoneChildId = null
+                                                    isAddChildFlowActive = true
+                                                },
+                                                onGoToFocusTab = { selectControllerTab(2) },
+                                                onSubScreenChanged = { isProfileSubScreenActive = it },
+                                                backTrigger = profileBackTrigger,
                                                 repository = repository
                                             )
                                         }
@@ -600,11 +683,15 @@ fun FocalRootApp(
                     }
                 }
 
-                // Completed Focus Summary Modal
+                // Completed Focus Summary Screen (Child)
                 focusEngine.lastCompletedSummary?.let { session ->
-                    FocusSummaryScreen(
-                        session = session,
-                        onDismiss = {
+                    SessionCompleteScreen(
+                        policyName = session.policyName,
+                        durationMinutes = session.targetDurationMinutes,
+                        blockedAttemptsCount = session.blockedAttempts,
+                        streakCount = com.focal.app.streak.StreakRepository.instance.getStreak(),
+                        focusTodayMinutes = focusEngine.todayFocusMinutes,
+                        onDoneClick = {
                             focusEngine.dismissSummary()
                             showActiveFocusScreen = false
                         }
@@ -619,8 +706,8 @@ fun FocalRootApp(
                     )
                 }
 
-                // Active Focus Overlay Screen
-                if (showActiveFocusScreen && focusEngine.currentSession != null) {
+                // Active Focus Overlay Screen (Non-child roles or legacy)
+                if (showActiveFocusScreen && focusEngine.currentSession != null && currentUser.role != UserRole.CHILD) {
                     ActiveFocusScreen(
                         onEndFocusClick = {
                             if (currentUser.planType == PlanType.NFC) {
@@ -632,43 +719,108 @@ fun FocalRootApp(
                     )
                 }
 
-                // Missing Permissions Bottom Sheet (Replaces Access Error popup)
-                var validationErrorMessage by remember { mutableStateOf<String?>(null) }
-                if (validationErrorMessage != null) {
-                    MissingPermissionsBottomSheet(
-                        missingItems = focusEngine.missingPermissionsList.ifEmpty { listOf(validationErrorMessage!!) },
-                        onDismiss = { validationErrorMessage = null },
-                        onOpenPermissions = {
-                            validationErrorMessage = null
-                            navigateToScreen(AppScreenState.CHILD_PERMISSIONS)
-                        }
-                    )
-                }
-
-                // NFC Scanner Dialog
+                // NFC Scanner Dialog / Tap Card Bottom Sheet
                 if (showNfcScanner) {
                     val isSessionActive = focusEngine.sessionState == SessionState.ACTIVE
-                    NfcScannerModal(
-                        title = if (isSessionActive) "Tap Card to End Focus" else "Tap Focus Card to Start",
-                        subtitle = if (isSessionActive) "Hold your registered NFC card to unlock apps." else "Hold your card near NFC area to begin restrictions.",
-                        onDismiss = { showNfcScanner = false },
-                        onCardScanned = { card ->
-                            showNfcScanner = false
-                            if (isSessionActive) {
-                                val res = focusEngine.endFocusWithNfc(card.cardId, currentUser)
-                                if (res.isFailure) {
-                                    validationErrorMessage = res.exceptionOrNull()?.message ?: "Only your paired card FC0001 can unlock this session."
-                                }
-                            } else {
-                                val res = focusEngine.startFocusWithNfc(card.cardId, currentUser)
-                                if (res.isSuccess) {
-                                    showActiveFocusScreen = true
-                                } else {
-                                    validationErrorMessage = res.exceptionOrNull()?.message ?: "This card isn't paired to you."
-                                }
+                    if (currentUser.role == UserRole.CHILD) {
+                        var tapSheetReaderState by remember {
+                            mutableStateOf(
+                                if (PlatformPermissionsHelper.isNfcEnabled())
+                                    com.focal.app.ui.child.components.ReaderState.LISTENING_USB
+                                else
+                                    com.focal.app.ui.child.components.ReaderState.NO_READER
+                            )
+                        }
+
+                        LaunchedEffect(focusEngine.sessionState) {
+                            if (isSessionActive && focusEngine.sessionState != SessionState.ACTIVE) {
+                                tapSheetReaderState = com.focal.app.ui.child.components.ReaderState.SUCCESS
+                                kotlinx.coroutines.delay(600)
+                                showNfcScanner = false
+                            } else if (!isSessionActive && focusEngine.sessionState == SessionState.ACTIVE) {
+                                tapSheetReaderState = com.focal.app.ui.child.components.ReaderState.SUCCESS
+                                kotlinx.coroutines.delay(600)
+                                showNfcScanner = false
                             }
                         }
-                    )
+
+                        val coroutineScope = rememberCoroutineScope()
+
+                        com.focal.app.ui.child.components.TapCardBottomSheet(
+                            isEndingFocus = isSessionActive,
+                            readerState = tapSheetReaderState,
+                            onDismiss = { showNfcScanner = false },
+                            onCardScanned = {
+                                val targetCardId = repository.childrenList.find { it.userId == currentUser.id }?.pairedCardId ?: "FC0001"
+                                if (isSessionActive) {
+                                    val res = focusEngine.endFocusWithNfc(targetCardId, currentUser)
+                                    if (res.isSuccess) {
+                                        tapSheetReaderState = com.focal.app.ui.child.components.ReaderState.SUCCESS
+                                        coroutineScope.launch {
+                                            kotlinx.coroutines.delay(600)
+                                            showNfcScanner = false
+                                        }
+                                    } else {
+                                        tapSheetReaderState = com.focal.app.ui.child.components.ReaderState.WRONG_CARD
+                                        coroutineScope.launch {
+                                            kotlinx.coroutines.delay(2000)
+                                            if (tapSheetReaderState == com.focal.app.ui.child.components.ReaderState.WRONG_CARD) {
+                                                tapSheetReaderState = com.focal.app.ui.child.components.ReaderState.LISTENING_USB
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    val res = focusEngine.startFocusWithNfc(targetCardId, currentUser)
+                                    if (res.isSuccess) {
+                                        tapSheetReaderState = com.focal.app.ui.child.components.ReaderState.SUCCESS
+                                        coroutineScope.launch {
+                                            kotlinx.coroutines.delay(600)
+                                            showNfcScanner = false
+                                        }
+                                    } else {
+                                        tapSheetReaderState = com.focal.app.ui.child.components.ReaderState.WRONG_CARD
+                                        coroutineScope.launch {
+                                            kotlinx.coroutines.delay(2000)
+                                            if (tapSheetReaderState == com.focal.app.ui.child.components.ReaderState.WRONG_CARD) {
+                                                tapSheetReaderState = com.focal.app.ui.child.components.ReaderState.LISTENING_USB
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            onTestWrongCard = {
+                                tapSheetReaderState = com.focal.app.ui.child.components.ReaderState.WRONG_CARD
+                                coroutineScope.launch {
+                                    kotlinx.coroutines.delay(2000)
+                                    if (tapSheetReaderState == com.focal.app.ui.child.components.ReaderState.WRONG_CARD) {
+                                        tapSheetReaderState = com.focal.app.ui.child.components.ReaderState.LISTENING_USB
+                                    }
+                                }
+                            }
+                        )
+                    } else {
+                        NfcScannerModal(
+                            title = if (isSessionActive) "Tap Card to End Focus" else "Tap Focus Card to Start",
+                            subtitle = if (isSessionActive) "Hold your registered NFC card to unlock apps." else "Hold your card near NFC area to begin restrictions.",
+                            onDismiss = { showNfcScanner = false },
+                            onCardScanned = { card ->
+                                showNfcScanner = false
+                                if (isSessionActive) {
+                                    val res = focusEngine.endFocusWithNfc(card.cardId, currentUser)
+                                    if (res.isFailure) {
+                                        PlatformPermissionsHelper.showToast(res.exceptionOrNull()?.message ?: "This isn't your family's FOCAL card.")
+                                    }
+                                } else {
+                                    val res = focusEngine.startFocusWithNfc(card.cardId, currentUser)
+                                    if (res.isSuccess) {
+                                        showActiveFocusScreen = true
+                                    } else {
+                                        PlatformPermissionsHelper.showToast(res.exceptionOrNull()?.message ?: "This isn't your family's FOCAL card.")
+                                    }
+                                }
+                            }
+                        )
+                    }
                 }
 
                 // QR Scanner Dialog
@@ -687,22 +839,13 @@ fun FocalRootApp(
                                 if (res.isSuccess) {
                                     showActiveFocusScreen = true
                                 } else {
-                                    validationErrorMessage = res.exceptionOrNull()?.message ?: "Invalid or expired Focus QR code."
+                                    PlatformPermissionsHelper.showToast(res.exceptionOrNull()?.message ?: "Invalid or expired Focus QR code.")
                                 }
                             }
                         }
                     )
                 }
 
-                // Add Child Modal
-                if (showAddChildModal) {
-                    AddChildModal(onDismiss = { showAddChildModal = false })
-                }
-
-                // Create Policy Modal
-                if (showCreatePolicyModal) {
-                    CreateFocusPolicyScreen(onDismiss = { showCreatePolicyModal = false })
-                }
 
                 // Generated Focus QR Modal
                 generatedFocusQrModal?.let { (qr, childName) ->
@@ -749,7 +892,20 @@ fun FocalRootApp(
                         onRoleSelected = { role ->
                             showRoleSwitcherModal = false
                             navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                        },
+                        onOpenComponentGallery = {
+                            showRoleSwitcherModal = false
+                            showComponentGallery = true
                         }
+                    )
+                }
+
+                // Global Parent Unlock Screen Modal
+                if (repository.showParentUnlockScreen) {
+                    com.focal.app.ui.child.ParentUnlockScreen(
+                        onClose = { repository.showParentUnlockScreen = false },
+                        onUnlockSuccess = { repository.showParentUnlockScreen = false },
+                        repository = repository
                     )
                 }
             }

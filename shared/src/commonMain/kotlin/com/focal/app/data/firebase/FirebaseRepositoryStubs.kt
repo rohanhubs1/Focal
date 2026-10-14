@@ -21,6 +21,14 @@ class FirebaseAuthRepository : AuthRepository {
         return Result.failure(NotImplementedError("Firebase auth not configured. Provide google-services.json to activate."))
     }
 
+    override suspend fun signInWithGoogle(): Result<User> {
+        return Result.failure(NotImplementedError("Firebase auth not configured."))
+    }
+
+    override suspend fun sendPasswordReset(email: String): Result<Unit> {
+        return Result.failure(NotImplementedError("Firebase auth not configured."))
+    }
+
     override suspend fun signOut() {
         // TODO (docs/04_BACKEND.md Section 1): Call Firebase Auth signOut()
     }

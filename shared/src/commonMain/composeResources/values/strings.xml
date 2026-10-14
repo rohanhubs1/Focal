@@ -1,0 +1,29 @@
+<resources>
+    <!-- Child App Strings -->
+    <string name="child_home_greeting">Hi,</string>
+    <string name="child_home_ready_title">Ready to\nfocus?</string>
+    <string name="child_home_tap_card">Tap card</string>
+    <string name="child_home_scan_qr">Scan QR</string>
+    <string name="child_home_today_activity">Today\'s activity</string>
+    <string name="child_home_focus_today">Focus today</string>
+    <string name="child_home_screen_time">Screen time</string>
+    <string name="child_home_protection_off">Protection is off</string>
+    <string name="child_schedules_title">Schedules</string>
+    <string name="child_insights_title">Insights</string>
+    <string name="child_profile_title">Profile</string>
+    <string name="child_parent_unlock_title">Parent unlock</string>
+    <string name="child_connected_parent_title">Connected to parent</string>
+    <string name="child_focal_card_title">FOCAL card</string>
+    <string name="child_protection_title">Protection</string>
+    <string name="child_notifications_title">Notifications</string>
+    <string name="child_help_title">Help &amp; support</string>
+    <string name="child_privacy_title">Privacy</string>
+    <string name="child_about_title">About</string>
+    <string name="child_pair_title">Connect to your parent</string>
+    <string name="child_scan_qr_title">Scan parent\'s QR</string>
+    <string name="child_waiting_title">Waiting for approval</string>
+    <string name="child_connected_title">Connected</string>
+    <string name="child_disclosure_title">Why FOCAL uses Accessibility</string>
+    <string name="child_checklist_title">Turn on protection</string>
+    <string name="child_all_set_title">You\'re all set</string>
+</resources>

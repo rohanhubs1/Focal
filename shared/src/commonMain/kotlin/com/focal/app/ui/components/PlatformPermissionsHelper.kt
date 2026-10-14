@@ -21,6 +21,7 @@ expect object PlatformPermissionsHelper {
     fun isDeviceAdminActive(): Boolean
     fun hasNfcHardware(): Boolean
     fun isNfcEnabled(): Boolean
+    fun isAnimationsDisabled(): Boolean
 
     fun openNewBrowserTab()
     fun getRealDailyScreenTimeMinutes(): Int
@@ -29,6 +30,18 @@ expect object PlatformPermissionsHelper {
     fun isSetupPageGraceActive(): Boolean
 
     fun copyToClipboard(text: String)
+    fun showToast(message: String)
+    fun getAppVersionName(): String
+    fun getAppVersionCode(): String
+    fun getDeviceManufacturer(): String
+    fun getAndroidVersion(): String
+
+    fun openEmailSupport(email: String, subject: String)
+    fun openUrl(url: String)
+    fun setKeepScreenOn(enable: Boolean)
+    fun setMaxBrightness(enable: Boolean)
+    fun shareQrCode(title: String, payload: String)
+    fun printQrCode(title: String, payload: String)
 }
 
 @androidx.compose.runtime.Composable
