@@ -181,10 +181,48 @@ data class FocusSession(
     val emergencyExits: Int = 0,
     val focusScore: Int = 85,
     val blockedAppsCount: Int = 7,
-    val blockedWebsitesCount: Int = 12
+    val blockedWebsitesCount: Int = 12,
+    val endTimeMillis: Long = startTimeMillis + (targetDurationMinutes * 60 * 1000L),
+    val startElapsedRealtime: Long = 0L,
+    val endedAtMillis: Long? = null
 ) {
-    val endTimeMillis: Long
-        get() = startTimeMillis + (targetDurationMinutes * 60 * 1000L)
+    fun getRemainingMillis(
+        nowElapsed: Long = com.focal.app.streak.getDeviceElapsedRealtime(),
+        nowWall: Long = com.focal.app.streak.getDeviceCurrentTimeMillis()
+    ): Long {
+        val durationMs = targetDurationMinutes * 60 * 1000L
+        // 1. Monotonic elapsed realtime check (elapsedRealtime monotonically advances)
+        if (startElapsedRealtime > 0L && nowElapsed >= startElapsedRealtime) {
+            val elapsedSinceStart = nowElapsed - startElapsedRealtime
+            return (durationMs - elapsedSinceStart).coerceAtLeast(0L)
+        }
+        // 2. Post-reboot fallback (nowElapsed < startElapsedRealtime because boot counter reset)
+        val wallRemaining = endTimeMillis - nowWall
+        // If the wall clock jumped forward more than the remaining time, keep focus active instead of ending
+        if (wallRemaining <= 0L) {
+            return 60_000L // Keep focus active
+        }
+        return wallRemaining.coerceAtLeast(0L)
+    }
+
+    val actualDurationMillis: Long
+        get() = ((endedAtMillis ?: currentTimeMillis()) - startTimeMillis).coerceAtLeast(0L)
+
+    val actualDurationMinutes: Int
+        get() = (actualDurationMillis / 60000L).toInt()
+
+    fun formatActualFocusedTime(): String {
+        val durationMs = actualDurationMillis
+        if (durationMs < 60_000L) return "<1m"
+        val totalMins = (durationMs / 60000L).toInt()
+        val hours = totalMins / 60
+        val mins = totalMins % 60
+        return when {
+            hours > 0 && mins == 0 -> "${hours}h 00m"
+            hours > 0 -> "${hours}h ${if (mins < 10) "0$mins" else "$mins"}m"
+            else -> "${mins}m"
+        }
+    }
 }
 
 data class FocusCard(
@@ -205,7 +243,9 @@ data class FocusCard(
     val assignedAt: String? = null,
     val ndefPayload: String = "FOCUSCARD:$token",
     val lastUsed: String = "Today at 09:30 AM",
-    val lastUsedChildName: String? = "Aarav"
+    val lastUsedChildName: String? = "Aarav",
+    val tapCount: Int = 0,
+    val lastTapTime: String? = null
 )
 
 data class QrToken(
@@ -222,16 +262,31 @@ data class QrToken(
     val scanCount: Int = 0
 )
 
+enum class EmergencyRequestStatus {
+    PENDING,
+    APPROVED,
+    DECLINED,
+    CANCELLED,
+    EXPIRED
+}
+
 data class EmergencyExitRequest(
     val id: String,
     val sessionId: String,
     val childId: String,
     val childName: String,
     val reason: String,
+    val note: String = "",
     val requestedAt: String,
     val requestedAtMillis: Long = 0L,
-    val status: String = "PENDING" // PENDING, APPROVED, REJECTED, EXPIRED
-)
+    val status: String = "PENDING" // PENDING | APPROVED | DECLINED | CANCELLED | EXPIRED
+) {
+    val isPending: Boolean get() = status == "PENDING"
+    val isApproved: Boolean get() = status == "APPROVED"
+    val isDeclined: Boolean get() = status == "DECLINED" || status == "REJECTED"
+    val isCancelled: Boolean get() = status == "CANCELLED"
+    val isExpired: Boolean get() = status == "EXPIRED"
+}
 
 data class ScheduleItem(
     val id: String,
@@ -310,13 +365,17 @@ data class AdminDeviceItem(
     val parentName: String,
     val deviceModel: String,
     val osVersion: String,
-    val appVersion: String = "1.2.0-monochrome",
+    val appVersion: String = "1.2.0",
     val isOnline: Boolean,
     val isProtectionActive: Boolean,
     val lastHeartbeat: String,
+    val isFocusing: Boolean = false,
+    val batteryPercent: Int = 85,
     val accessibilityGranted: Boolean = true,
     val overlayGranted: Boolean = true,
+    val deviceAdminGranted: Boolean = true,
     val usageGranted: Boolean = true,
-    val notificationsGranted: Boolean = true
+    val notificationsGranted: Boolean = true,
+    val batteryUnrestricted: Boolean = true
 )
 

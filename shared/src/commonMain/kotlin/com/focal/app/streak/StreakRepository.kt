@@ -195,7 +195,15 @@ interface StreakRepository {
     fun getCountedDates(): Set<StreakDate>
 
     companion object {
-        val instance: StreakRepository by lazy { DefaultStreakRepository() }
+        val instance: StreakRepository by lazy {
+            val now = currentTimeMillis()
+            val dayMs = 24 * 60 * 60 * 1000L
+            val seedSessions = listOf(
+                StreakSessionRecord("seed_1", now - 2 * dayMs, now - 2 * dayMs + 1800000L, 30, StreakEndReason.TIMER_FINISHED),
+                StreakSessionRecord("seed_2", now - 1 * dayMs, now - 1 * dayMs + 2400000L, 40, StreakEndReason.TIMER_FINISHED)
+            )
+            DefaultStreakRepository(initialSessions = seedSessions)
+        }
     }
 }
 

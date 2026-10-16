@@ -33,6 +33,7 @@ import com.focal.app.ui.admin.AdminDashboardScreen
 import com.focal.app.ui.auth.*
 import com.focal.app.ui.child.*
 import com.focal.app.ui.child.components.ComponentGalleryScreen
+import com.focal.app.ui.child.components.FocalSheetTracker
 import com.focal.app.ui.child.pairing.*
 import com.focal.app.ui.child.protection.*
 import com.focal.app.pairing.*
@@ -316,6 +317,31 @@ fun FocalRootApp(
         }
     }
 
+    LaunchedEffect(repository.requestNavigateToChildHomeCounter) {
+        if (repository.requestNavigateToChildHomeCounter > 0) {
+            childSubScreen = null
+            repository.showParentUnlockScreen = false
+            showNfcScanner = false
+            showQrScanner = false
+            showActiveFocusScreen = false
+            showComponentGallery = false
+            showNotificationsModal = false
+            generatedFocusQrModal = null
+            showAddChildModal = false
+            showPermissionsModal = false
+            isPolicyEditingActive = false
+            isAddChildFlowActive = false
+            isProfileSubScreenActive = false
+            FocalSheetTracker.reset()
+            if (currentUser.role == UserRole.CHILD) {
+                if (screenState != AppScreenState.MAIN_APP) {
+                    navigateToScreen(AppScreenState.MAIN_APP, clearHistory = true)
+                }
+                selectChildTab(0)
+            }
+        }
+    }
+
     FocalBackHandler(enabled = canGoBack, onBack = handleBack)
 
     FocalTheme {
@@ -324,20 +350,13 @@ fun FocalRootApp(
         } else {
             Scaffold(
                 containerColor = FocalColors.Background,
-                contentWindowInsets = if (currentUser.role == UserRole.CHILD || currentUser.role == UserRole.CONTROLLER) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars,
-                topBar = {
-                    if (screenState == AppScreenState.MAIN_APP && currentUser.role == UserRole.ADMIN) {
-                        FocalTopBar(
-                            title = "Admin Dashboard",
-                            onBackClick = null
-                        )
-                    }
-                },
+                contentWindowInsets = if (currentUser.role == UserRole.CHILD || currentUser.role == UserRole.CONTROLLER || currentUser.role == UserRole.ADMIN) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars,
+                topBar = {},
                 bottomBar = {
                     if (screenState == AppScreenState.MAIN_APP && (!showActiveFocusScreen || currentUser.role == UserRole.CHILD)) {
                         when (currentUser.role) {
                             UserRole.CHILD -> {
-                                if (childSubScreen == null && !repository.showParentUnlockScreen && !showNfcScanner && !showQrScanner && !com.focal.app.ui.child.components.FocalSheetTracker.isAnySheetOpen) {
+                                if (childSubScreen == null && !repository.showParentUnlockScreen && !showNfcScanner && !showQrScanner && !FocalSheetTracker.isAnySheetOpen && focusEngine.lastCompletedSummary == null) {
                                     com.focal.app.ui.child.components.ChildBottomNav(
                                         selectedTab = com.focal.app.ui.child.components.ChildTab.entries[childTabIndex],
                                         onTabSelected = { navigateToTab(it.ordinal) },
@@ -346,7 +365,7 @@ fun FocalRootApp(
                                 }
                             }
                             UserRole.CONTROLLER -> {
-                                if (selectedChildForManagement == null && !isPolicyEditingActive && !isAddChildFlowActive && !isProfileSubScreenActive && !com.focal.app.ui.child.components.FocalSheetTracker.isAnySheetOpen) {
+                                if (selectedChildForManagement == null && !isPolicyEditingActive && !isAddChildFlowActive && !isProfileSubScreenActive && !FocalSheetTracker.isAnySheetOpen) {
                                     com.focal.app.ui.components.ParentBottomNav(
                                         selectedTab = com.focal.app.ui.components.ParentTab.entries.getOrElse(controllerTabIndex) { com.focal.app.ui.components.ParentTab.HOME },
                                         onTabSelected = { navigateToTab(it.ordinal) },
@@ -706,26 +725,34 @@ fun FocalRootApp(
                                 }
 
                                 UserRole.ADMIN -> {
-                                    AdminDashboardScreen()
+                                    if (!com.focal.app.config.FocalConfig.isDemoMode && !com.focal.app.data.AuthRepository.instance.isUserAdmin()) {
+                                        LaunchedEffect(Unit) {
+                                            val role = com.focal.app.data.FocalLocalStorage.getString("KEY_SELECTED_ROLE", "")
+                                            if (role == "PARENT") {
+                                                repository.switchUserRole(UserRole.CONTROLLER)
+                                            } else if (role == "CHILD") {
+                                                repository.switchUserRole(UserRole.CHILD)
+                                            } else {
+                                                navigateToScreen(AppScreenState.WELCOME, clearHistory = true)
+                                            }
+                                        }
+                                    } else {
+                                        AdminDashboardScreen()
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                // Completed Focus Summary Screen (Child)
-                focusEngine.lastCompletedSummary?.let { session ->
-                    SessionCompleteScreen(
-                        policyName = session.policyName,
-                        durationMinutes = session.targetDurationMinutes,
-                        blockedAttemptsCount = session.blockedAttempts,
-                        streakCount = com.focal.app.streak.StreakRepository.instance.getStreak(),
-                        focusTodayMinutes = focusEngine.todayFocusMinutes,
-                        onDoneClick = {
-                            focusEngine.dismissSummary()
-                            showActiveFocusScreen = false
-                        }
-                    )
+                // Navigate Child to Home on completed focus so SessionCompleteScreen is shown cleanly inside ChildDashboardScreen
+                LaunchedEffect(focusEngine.lastCompletedSummary) {
+                    if (focusEngine.lastCompletedSummary != null && currentUser.role == UserRole.CHILD) {
+                        childTabIndex = 0
+                        childTabHistory.clear()
+                        childTabHistory.add(0)
+                        childSubScreen = null
+                    }
                 }
 
                 // Blocked App Overlay Experience
@@ -893,24 +920,24 @@ fun FocalRootApp(
                         modifier = Modifier
                             .fillMaxSize()
                             .windowInsetsPadding(WindowInsets.statusBars)
-                            .padding(top = 4.dp, start = 8.dp),
+                            .padding(top = 2.dp, start = 8.dp),
                         contentAlignment = Alignment.TopStart
                     ) {
                         Box(
                             modifier = Modifier
-                                .alpha(0.5f)
-                                .clip(RoundedCornerShape(10.dp))
+                                .alpha(0.6f)
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(Color(0xFF1F1F1F))
-                                .border(1.dp, Color(0xFF555555), RoundedCornerShape(10.dp))
+                                .border(1.dp, Color(0xFF555555), RoundedCornerShape(8.dp))
                                 .clickable { showRoleSwitcherModal = true }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = "DEV",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
-                                    fontSize = 10.sp
+                                    fontSize = 9.sp
                                 )
                             )
                         }

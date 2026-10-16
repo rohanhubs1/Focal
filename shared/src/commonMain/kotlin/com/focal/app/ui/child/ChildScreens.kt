@@ -42,6 +42,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.focal.app.streak.StreakRepository
 import com.focal.app.streak.getDeviceTimeZoneOffsetMillis
 import com.focal.app.streak.getDeviceCurrentTime
+import com.focal.app.streak.getDeviceCurrentTimeMillis
+import com.focal.app.streak.formatTimeLocal
 import com.focal.app.streak.CurrentDeviceTime
 import com.focal.app.data.ScreenTimeRepository
 import com.focal.app.data.InsightsRange
@@ -69,26 +71,14 @@ import com.focal.app.ui.theme.ChildRadius
 import com.focal.app.ui.theme.LocalChildTypography
 import com.focal.app.ui.theme.ChildTheme
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 // -------------------------------------------------------------
 // 1. CHILD DASHBOARD / HOME (IDLE & ACTIVE STATES)
 // -------------------------------------------------------------
 private fun formatEndTime(startTimeMillis: Long, durationMinutes: Int): String {
     val endMillis = startTimeMillis + (durationMinutes * 60 * 1000L)
-    val tzOffset = getDeviceTimeZoneOffsetMillis()
-    val localSecs = ((endMillis + tzOffset) / 1000L) % 86400L
-    val positiveSecs = if (localSecs < 0) localSecs + 86400L else localSecs
-    val hours24 = (positiveSecs / 3600).toInt()
-    val minutes = ((positiveSecs % 3600) / 60).toInt()
-    val isPm = hours24 >= 12
-    val hours12 = when {
-        hours24 == 0 -> 12
-        hours24 > 12 -> hours24 - 12
-        else -> hours24
-    }
-    val minStr = if (minutes < 10) "0$minutes" else "$minutes"
-    val amPm = if (isPm) "PM" else "AM"
-    return "$hours12:$minStr $amPm"
+    return formatTimeLocal(endMillis)
 }
 
 @Composable
@@ -104,6 +94,7 @@ fun ChildDashboardScreen(
 ) {
     val typography = LocalChildTypography.current
     val user = repository.currentUser
+    val displayName = if (user.name.contains("Rahul", ignoreCase = true) || user.name.isBlank()) "Aarav" else user.name
     val isActive = focusEngine.sessionState == SessionState.ACTIVE
     val currentSession = focusEngine.currentSession
 
@@ -132,21 +123,22 @@ fun ChildDashboardScreen(
     var showLockNowSnackbar by remember { mutableStateOf(false) }
 
     var showEndFocusSheet by remember { mutableStateOf(false) }
+    var endFocusSheetKey by remember { mutableIntStateOf(0) }
     var showSessionComplete by remember { mutableStateOf(false) }
     var cardListeningSubtitle by remember { mutableStateOf("Listening… the same card ends focus") }
     val emergencyRepo = com.focal.app.data.EmergencyExitRepository.instance
     val emergencyState by emergencyRepo.requestState.collectAsState()
     val isEmergencyPending = emergencyState is com.focal.app.data.EmergencyRequestState.Pending
     var completedSessionSummary by remember { mutableStateOf<FocusSession?>(null) }
+    var lastHandledSessionId by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // Observe normal completion (timer expired naturally)
-    LaunchedEffect(focusEngine.sessionState) {
-        if (focusEngine.sessionState == SessionState.COMPLETED) {
-            val lastSummary = focusEngine.lastCompletedSummary
-            if (lastSummary != null && !showEndFocusSheet && lastSummary.triggerType != TriggerType.NFC && lastSummary.triggerType != TriggerType.EMERGENCY_OVERRIDE) {
-                completedSessionSummary = lastSummary
-                showSessionComplete = true
-            }
+    // Observe completed session and open SessionCompleteScreen only ONCE per session
+    val lastSummary = focusEngine.lastCompletedSummary
+    LaunchedEffect(lastSummary?.id) {
+        if (lastSummary != null && lastSummary.id != lastHandledSessionId) {
+            lastHandledSessionId = lastSummary.id
+            completedSessionSummary = lastSummary
+            showSessionComplete = true
         }
     }
 
@@ -158,9 +150,11 @@ fun ChildDashboardScreen(
             blockedAttemptsCount = summary.blockedAttempts,
             streakCount = currentStreak,
             focusTodayMinutes = todayFocusMin,
+            actualDurationMillis = summary.actualDurationMillis,
             onDoneClick = {
                 showSessionComplete = false
                 completedSessionSummary = null
+                focusEngine.dismissSummary()
             }
         )
     } else {
@@ -185,7 +179,7 @@ fun ChildDashboardScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ChildAvatar(name = user.name, size = 48.dp)
+                ChildAvatar(name = displayName, size = 48.dp)
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -196,7 +190,7 @@ fun ChildDashboardScreen(
                         )
                     )
                     Text(
-                        text = user.name,
+                        text = displayName,
                         style = typography.title.copy(
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
@@ -342,14 +336,43 @@ fun ChildDashboardScreen(
 
                                 Spacer(Modifier.height(24.dp))
 
+                                val endTimeMillis = currentSession?.endTimeMillis ?: 0L
+                                val startTimeMillis = currentSession?.startTimeMillis ?: (endTimeMillis - (currentSession?.targetDurationMinutes ?: 90) * 60 * 1000L)
+                                val nowElapsed by produceState(com.focal.app.streak.getDeviceElapsedRealtime()) {
+                                    while (true) {
+                                        value = com.focal.app.streak.getDeviceElapsedRealtime()
+                                        delay(1000 - value % 1000)
+                                    }
+                                }
+                                val remainingMs = if (isActive && currentSession != null) {
+                                    currentSession.getRemainingMillis(nowElapsed, com.focal.app.streak.getDeviceCurrentTimeMillis())
+                                } else 0L
+
+                                // When remaining reaches 0: end the session once (same code path as End focus)
+                                LaunchedEffect(remainingMs, isActive) {
+                                    if (isActive && currentSession != null && remainingMs <= 0L) {
+                                        focusEngine.endFocus(TriggerType.TIMER_EXPIRED, "Timer Expired")
+                                    }
+                                }
+
+                                val totalSessionMs = (endTimeMillis - startTimeMillis).coerceAtLeast(1000L)
+                                val targetProgress = (remainingMs.toFloat() / totalSessionMs.toFloat()).coerceIn(0f, 1f)
+                                val animatedProgress by animateFloatAsState(targetValue = targetProgress, label = "focusRingProgress")
+
+                                val remainingSecs = remainingMs / 1000L
+                                val hours = remainingSecs / 3600
+                                val minutes = (remainingSecs % 3600) / 60
+                                val seconds = remainingSecs % 60
+                                val formattedRemainingTime = "${if (hours < 10) "0$hours" else "$hours"}:${if (minutes < 10) "0$minutes" else "$minutes"}:${if (seconds < 10) "0$seconds" else "$seconds"}"
+
                                 CountdownRing(
-                                    progress = focusEngine.progressFraction,
+                                    progress = animatedProgress,
                                     modifier = Modifier.size(236.dp),
                                     strokeWidth = 10.dp,
                                     centerContent = {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text(
-                                                text = focusEngine.formatRemainingTime(),
+                                                text = formattedRemainingTime,
                                                 style = typography.display.copy(
                                                     fontSize = 38.sp,
                                                     fontWeight = FontWeight.Bold,
@@ -374,10 +397,7 @@ fun ChildDashboardScreen(
 
                                 Spacer(Modifier.height(20.dp))
 
-                                val endTimeStr = formatEndTime(
-                                    currentSession?.startTimeMillis ?: com.focal.app.model.currentTimeMillis(),
-                                    currentSession?.targetDurationMinutes ?: 160
-                                )
+                                val endTimeStr = if (endTimeMillis > 0L) formatTimeLocal(endTimeMillis) else "12:00 PM"
                                 val startedWithText = when (currentSession?.triggerType) {
                                     TriggerType.NFC -> "card"
                                     TriggerType.QR -> "QR"
@@ -463,6 +483,7 @@ fun ChildDashboardScreen(
                             text = "End focus",
                             onClick = {
                                 cardListeningSubtitle = "Listening… the same card ends focus"
+                                endFocusSheetKey++
                                 showEndFocusSheet = true
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -696,8 +717,28 @@ fun ChildDashboardScreen(
                     }
                 }
             }
+        }
 
-            if (showEndFocusSheet) {
+        if (showEndFocusSheet) {
+            key(endFocusSheetKey) {
+                val parentFullName = repository.controllerUser.name.ifBlank {
+                    com.focal.app.data.FocalLocalStorage.getString(
+                        com.focal.app.pairing.PairingRepository.KEY_PAIRED_PARENT_NAME,
+                        "Parent"
+                    )
+                }
+                val parentFirstName = parentFullName.split(" ").firstOrNull()?.ifBlank { null } ?: parentFullName
+
+                val pendingExitRequest = repository.emergencyRequests.firstOrNull {
+                    (it.childId == user.id || it.childId == "child_1") &&
+                        (it.sessionId == currentSession?.id || currentSession == null) &&
+                        it.status == "PENDING"
+                }
+                val latestExitRequest = repository.emergencyRequests.firstOrNull {
+                    (it.childId == user.id || it.childId == "child_1") &&
+                        (it.sessionId == currentSession?.id || currentSession == null)
+                }
+
                 EndFocusBottomSheet(
                     policyName = currentSession?.policyName ?: "Study Mode",
                     remainingMinutes = (focusEngine.remainingSeconds / 60).coerceAtLeast(1),
@@ -717,11 +758,18 @@ fun ChildDashboardScreen(
                             cardListeningSubtitle = "This isn't your family's FOCAL card"
                         }
                     },
-                    onRequestEmergencyExit = { reason ->
-                        emergencyRepo.request(reason)
+                    onRequestEmergencyExit = { reason, note ->
+                        val currentSess = focusEngine.currentSession
+                        if (currentSess != null) {
+                            repository.submitEmergencyExitRequest(currentSess.id, reason, note, user.id, displayName)
+                        }
                     },
-                    isRequestPending = isEmergencyPending,
-                    parentName = "Mom"
+                    onCancelEmergencyExit = {
+                        repository.cancelEmergencyExitRequest(user.id)
+                    },
+                    parentName = parentFirstName,
+                    pendingRequest = pendingExitRequest,
+                    latestRequest = latestExitRequest
                 )
             }
         }
@@ -770,9 +818,29 @@ fun SessionCompleteScreen(
     streakCount: Int,
     focusTodayMinutes: Int,
     onDoneClick: () -> Unit,
+    actualDurationMillis: Long = durationMinutes * 60 * 1000L,
     modifier: Modifier = Modifier
 ) {
     val typography = LocalChildTypography.current
+
+    // Auto-return to Child Home after 8 seconds
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(8000L)
+        onDoneClick()
+    }
+
+    // System Back triggers Done
+    com.focal.app.ui.components.FocalBackHandler(enabled = true) {
+        onDoneClick()
+    }
+
+    // Ensure bottom nav is hidden while SessionCompleteScreen is showing
+    DisposableEffect(Unit) {
+        FocalSheetTracker.onSheetShown()
+        onDispose {
+            FocalSheetTracker.onSheetHidden()
+        }
+    }
 
     val animatedScale = remember { Animatable(0.8f) }
     val animatedCheckAlpha = remember { Animatable(0f) }
@@ -784,9 +852,12 @@ fun SessionCompleteScreen(
         animatedCheckAlpha.animateTo(1f, animationSpec = tween(400, easing = FastOutSlowInEasing))
     }
 
-    val hours = durationMinutes / 60
-    val mins = durationMinutes % 60
+    // Big number: actual focused time = endedAt - startedAt (under 1 min -> "<1m")
+    val totalMins = (actualDurationMillis / 60000L).toInt()
+    val hours = totalMins / 60
+    val mins = totalMins % 60
     val totalFocusedTimeText = when {
+        actualDurationMillis < 60_000L -> "<1m"
         hours > 0 && mins == 0 -> "${hours}h 00m"
         hours > 0 -> "${hours}h ${if (mins < 10) "0$mins" else "$mins"}m"
         else -> "${mins}m"
@@ -794,7 +865,11 @@ fun SessionCompleteScreen(
 
     val todayHours = focusTodayMinutes / 60
     val todayMins = focusTodayMinutes % 60
-    val focusTodayText = if (todayHours > 0) "${todayHours}h ${todayMins}m" else "${todayMins}m"
+    val focusTodayText = when {
+        focusTodayMinutes <= 0 && actualDurationMillis > 0 -> "<1m"
+        todayHours > 0 -> "${todayHours}h ${todayMins}m"
+        else -> "${todayMins}m"
+    }
 
     Box(
         modifier = modifier
@@ -802,7 +877,7 @@ fun SessionCompleteScreen(
             .background(Color.Black)
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 24.dp, vertical = 20.dp)
+            .padding(vertical = 16.dp)
     ) {
         // Soft radial glow at top
         Canvas(modifier = Modifier.fillMaxWidth().height(260.dp).align(Alignment.TopCenter)) {
@@ -824,9 +899,13 @@ fun SessionCompleteScreen(
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp)
             ) {
-                Spacer(Modifier.height(32.dp))
+                Spacer(Modifier.height(24.dp))
 
                 // 116dp circle, 2dp white border with white glow, check icon
                 Box(
@@ -863,7 +942,7 @@ fun SessionCompleteScreen(
                     )
                 }
 
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(24.dp))
 
                 // "SESSION COMPLETE" overline
                 Text(
@@ -902,18 +981,18 @@ fun SessionCompleteScreen(
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(Modifier.height(36.dp))
+                Spacer(Modifier.height(28.dp))
 
-                // 3 equal GlassCards (radius 20), single-line labels
+                // 3 equal GlassCards (radius 20) with wrapping labels so they NEVER truncate
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Card 1: Blocked
                     GlassCard(
                         modifier = Modifier.weight(1f),
                         radius = 20.dp,
-                        padding = 16.dp
+                        padding = 10.dp
                     ) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
@@ -922,7 +1001,7 @@ fun SessionCompleteScreen(
                             Text(
                                 text = "$blockedAttemptsCount",
                                 style = typography.title.copy(
-                                    fontSize = 24.sp,
+                                    fontSize = 22.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 ),
@@ -932,9 +1011,9 @@ fun SessionCompleteScreen(
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 text = "Blocked",
-                                style = typography.caption.copy(color = ChildColors.Secondary),
-                                maxLines = 1,
-                                softWrap = false
+                                style = typography.caption.copy(color = ChildColors.Secondary, fontSize = 12.sp),
+                                maxLines = 2,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
@@ -943,7 +1022,7 @@ fun SessionCompleteScreen(
                     GlassCard(
                         modifier = Modifier.weight(1f),
                         radius = 20.dp,
-                        padding = 16.dp
+                        padding = 10.dp
                     ) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
@@ -952,7 +1031,7 @@ fun SessionCompleteScreen(
                             Text(
                                 text = "$streakCount",
                                 style = typography.title.copy(
-                                    fontSize = 24.sp,
+                                    fontSize = 22.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 ),
@@ -962,18 +1041,18 @@ fun SessionCompleteScreen(
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 text = "Day streak",
-                                style = typography.caption.copy(color = ChildColors.Secondary),
-                                maxLines = 1,
-                                softWrap = false
+                                style = typography.caption.copy(color = ChildColors.Secondary, fontSize = 12.sp),
+                                maxLines = 2,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
 
-                    // Card 3: Focus today
+                    // Card 3: Focus today (label never truncates)
                     GlassCard(
                         modifier = Modifier.weight(1f),
                         radius = 20.dp,
-                        padding = 16.dp
+                        padding = 10.dp
                     ) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
@@ -982,33 +1061,40 @@ fun SessionCompleteScreen(
                             Text(
                                 text = focusTodayText,
                                 style = typography.title.copy(
-                                    fontSize = 20.sp,
+                                    fontSize = 18.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 ),
-                                maxLines = 1,
-                                softWrap = false
+                                maxLines = 1
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 text = "Focus today",
-                                style = typography.caption.copy(color = ChildColors.Secondary),
-                                maxLines = 1,
-                                softWrap = false
+                                style = typography.caption.copy(color = ChildColors.Secondary, fontSize = 12.sp),
+                                maxLines = 2,
+                                softWrap = true,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
                 }
+
+                Spacer(Modifier.height(16.dp))
             }
 
-            // PrimaryButton "Done" -> Home Ready
-            ChildPrimaryButton(
-                text = "Done",
-                onClick = onDoneClick,
+            // White PrimaryButton "Done" at bottom with 24dp side padding
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
                     .padding(bottom = 12.dp)
-            )
+            ) {
+                ChildPrimaryButton(
+                    text = "Done",
+                    onClick = onDoneClick,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }

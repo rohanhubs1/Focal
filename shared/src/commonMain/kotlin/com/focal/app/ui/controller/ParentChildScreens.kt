@@ -1,6 +1,7 @@
 package com.focal.app.ui.controller
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -98,14 +99,11 @@ fun ChildDetailScreen(
     var showPolicyPickerSheet by remember { mutableStateOf(false) }
     var showDurationSheet by remember { mutableStateOf(false) }
 
-    // 1-second ticker for live timer
-    var tickerNow by remember { mutableStateOf(currentTimeMillis()) }
-    LaunchedEffect(currentChild.isFocusing) {
-        if (currentChild.isFocusing) {
-            while (true) {
-                delay(1000)
-                tickerNow = currentTimeMillis()
-            }
+    // Real-time ticker synchronized with system clock
+    val tickerNow by produceState(com.focal.app.streak.getDeviceCurrentTimeMillis(), currentChild.focusEndsAtMillis) {
+        while (true) {
+            value = com.focal.app.streak.getDeviceCurrentTimeMillis()
+            delay(1000 - value % 1000)
         }
     }
 
@@ -120,6 +118,7 @@ fun ChildDetailScreen(
     val isActuallyFocusing = currentChild.isFocusing && liveRemainingSecs > 0L
     val totalFocusSecs = (currentChild.focusTotalMinutes * 60L).coerceAtLeast(1L)
     val progressVal = if (isActuallyFocusing) (liveRemainingSecs.toFloat() / totalFocusSecs.toFloat()).coerceIn(0f, 1f) else 0f
+    val animatedProgressVal by animateFloatAsState(targetValue = progressVal, label = "childCountdownProgress")
     val remMins = liveRemainingSecs / 60
     val remSecs = liveRemainingSecs % 60
     val timeText = "${remMins}:${if (remSecs < 10) "0$remSecs" else "$remSecs"}"
@@ -332,7 +331,7 @@ fun ChildDetailScreen(
 
                                 // CountdownRing (150dp)
                                 CountdownRing(
-                                    progress = progressVal,
+                                    progress = animatedProgressVal,
                                     modifier = Modifier.size(150.dp),
                                     strokeWidth = 8.dp,
                                     centerContent = {
@@ -365,8 +364,9 @@ fun ChildDetailScreen(
                                 Spacer(Modifier.height(18.dp))
 
                                 val policyName = repository.policies.find { it.id == currentChild.defaultPolicyId }?.name ?: "Study Mode"
+                                val endsStr = if (currentChild.focusEndsAtMillis > 0L) "ends " + com.focal.app.streak.formatTimeLocal(currentChild.focusEndsAtMillis) else "ends 12:00 PM"
                                 Text(
-                                    text = "$policyName · started with card · ends 12:00 PM",
+                                    text = "$policyName · started with card · $endsStr",
                                     style = typography.caption.copy(
                                         fontSize = 13.sp,
                                         color = ChildColors.Secondary
@@ -707,7 +707,7 @@ fun ChildDetailScreen(
                                     details = "Ended by parent",
                                     metadata = mapOf("source" to "you")
                                 )
-                                PlatformPermissionsHelper.showToast("Focus ended on ${currentChild.name}'s phone")
+                                PlatformPermissionsHelper.showToast("Focus ended for ${currentChild.name}")
                             },
                             modifier = Modifier.weight(1f).height(48.dp)
                         )

@@ -16,7 +16,8 @@ enum class ActivityEventType {
     EXIT_DECLINED,
     PROTECTION_OFF,
     PROTECTION_ON,
-    PHONE_PAIRED
+    PHONE_PAIRED,
+    CLOCK_CHANGED
 }
 
 data class ActivityEvent(
@@ -59,6 +60,7 @@ fun ActivityEvent.getDisplayTitle(): String {
         ActivityEventType.PROTECTION_OFF -> "Protection is off"
         ActivityEventType.PROTECTION_ON -> "Protection is back on"
         ActivityEventType.PHONE_PAIRED -> "Phone connected"
+        ActivityEventType.CLOCK_CHANGED -> "Clock changed"
     }
 }
 
@@ -104,6 +106,7 @@ fun ActivityEvent.getDisplayDetail(): String {
         ActivityEventType.PHONE_PAIRED -> {
             metadata["device"] ?: "Realme · Android 14"
         }
+        ActivityEventType.CLOCK_CHANGED -> "Time was adjusted during focus"
     }
 }
 

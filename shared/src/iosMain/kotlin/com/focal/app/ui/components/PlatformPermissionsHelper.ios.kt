@@ -41,6 +41,7 @@ actual object PlatformPermissionsHelper {
     actual fun setMaxBrightness(enable: Boolean) {}
     actual fun shareQrCode(title: String, payload: String) {}
     actual fun printQrCode(title: String, payload: String) {}
+    actual fun testBlockScreen() {}
 }
 
 @androidx.compose.runtime.Composable

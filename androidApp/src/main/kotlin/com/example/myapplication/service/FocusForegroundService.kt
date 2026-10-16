@@ -141,10 +141,10 @@ class FocusForegroundService : Service() {
 
     private fun buildNotification(): Notification {
         val engine = FocusEngine.instance
-        val remaining = engine.formatRemainingTime()
         val currentSession = engine.currentSession
         val policyTitle = currentSession?.policyName ?: "Focus Session"
         val blockedCount = currentSession?.blockedAppsCount ?: 6
+        val endTime = currentSession?.endTimeMillis ?: (System.currentTimeMillis() + engine.remainingSeconds * 1000L)
 
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -158,9 +158,13 @@ class FocusForegroundService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🛡️ FOCAL — $policyTitle Active")
-            .setContentText("⏳ $remaining remaining • $blockedCount apps & websites restricted")
+            .setContentText("Apps & websites restricted • $blockedCount blocked")
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(pendingIntent)
+            .setWhen(endTime)
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .setChronometerCountDown(true)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

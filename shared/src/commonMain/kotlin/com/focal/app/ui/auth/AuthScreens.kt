@@ -22,7 +22,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -705,32 +707,44 @@ fun WelcomeScreen(
     val typography = LocalChildTypography.current
     var selectedRole by remember { mutableStateOf<UserRole?>(null) }
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
+        val screenHeight = maxHeight
+        val screenWidth = maxWidth
+        val heroHeight = if (screenHeight < 700.dp) 220.dp else 300.dp
+        val cardWidth = screenWidth * 0.62f
+        val cardHeight = cardWidth / 1.6f
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp)
                 .padding(bottom = 120.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(16.dp))
+            // Top hero area: statusBarsPadding(), fixed height heroHeight, clipped so nothing draws outside
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(heroHeight)
+                    .statusBarsPadding()
+                    .clipToBounds(),
+                contentAlignment = Alignment.Center
+            ) {
+                FocalCardHero(
+                    modifier = Modifier.fillMaxSize(),
+                    cardWidth = cardWidth,
+                    cardHeight = cardHeight,
+                    tiltAngle = -12f,
+                    ringCount = 2,
+                    pulsingRings = false
+                )
+            }
 
-            // Centered FocalCardHero (-12° tilt, 2 ellipse rings)
-            FocalCardHero(
-                cardWidth = 240.dp,
-                cardHeight = 150.dp,
-                tiltAngle = -12f,
-                ringCount = 2,
-                pulsingRings = false
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             Text(
                 text = "Welcome to FOCAL",
@@ -757,7 +771,9 @@ fun WelcomeScreen(
 
             // Two role cards side-by-side
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Card 1: Parent
@@ -808,7 +824,9 @@ fun WelcomeScreen(
                         onChildSelected()
                     }
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .alpha(if (selectedRole != null) 1f else 0.4f)
             )
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -870,9 +888,9 @@ private fun RoleChoiceCard(
                 if (isSelected) {
                     drawRoundRect(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color.White.copy(alpha = 0.16f), Color.Transparent),
+                            colors = listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.05f), Color.Transparent),
                             center = center,
-                            radius = size.width / 1.1f
+                            radius = size.maxDimension / 1.15f
                         ),
                         cornerRadius = CornerRadius(24.dp.toPx())
                     )
@@ -885,7 +903,7 @@ private fun RoleChoiceCard(
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .size(20.dp)
+                .size(22.dp)
                 .clip(CircleShape)
                 .border(
                     width = if (isSelected) 2.dp else 1.5.dp,
@@ -897,7 +915,7 @@ private fun RoleChoiceCard(
             if (isSelected) {
                 Box(
                     modifier = Modifier
-                        .size(10.dp)
+                        .size(11.dp)
                         .clip(CircleShape)
                         .background(Color.White)
                 )

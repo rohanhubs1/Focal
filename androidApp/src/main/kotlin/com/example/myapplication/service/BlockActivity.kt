@@ -1,10 +1,12 @@
 package com.example.myapplication.service
 
+import android.content.Context
 import android.content.Intent
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.TextUtils
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -13,11 +15,41 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import com.example.myapplication.MainActivity
 import com.example.myapplication.R
+import com.focal.app.data.FocalRepository
 import com.focal.app.engine.FocusEngine
+import com.focal.app.protection.ProtectionStateRepository
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class BlockActivity : ComponentActivity() {
+
+    companion object {
+        private const val TAG = "BlockActivity"
+
+        var isShowing: Boolean = false
+            private set
+
+        var currentBlockedPackage: String? = null
+            private set
+
+        var activeInstance: BlockActivity? = null
+            private set
+
+        fun closeIfShowing(context: Context) {
+            activeInstance?.let { activity ->
+                activity.runOnUiThread {
+                    activity.navigateToChildHomeAndFinish()
+                }
+            }
+        }
+    }
 
     private val MOTIVATIONAL_QUOTES = listOf(
         "Small focus now, big wins later.",
@@ -27,14 +59,26 @@ class BlockActivity : ComponentActivity() {
         "Great things take uninterrupted time."
     )
 
+    private var titleTextView: TextView? = null
+    private var subtitleTextView: TextView? = null
+    private var statsTextView: TextView? = null
+    private var quoteTextView: TextView? = null
+    private var appImageView: ImageView? = null
+    private var focusMonitorJob: Job? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         @Suppress("DEPRECATION")
-        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+        overridePendingTransition(0, 0)
+
+        isShowing = true
+        activeInstance = this
 
         val title = intent.getStringExtra("EXTRA_TITLE") ?: intent.getStringExtra("EXTRA_TARGET_NAME") ?: "App is blocked"
         val subtitle = intent.getStringExtra("EXTRA_SUBTITLE") ?: intent.getStringExtra("EXTRA_POLICY_NAME") ?: "Protected by FOCAL · ask a parent"
         val packageName = intent.getStringExtra("EXTRA_PACKAGE_NAME")
+        val isParentUnlockAllowed = intent.getBooleanExtra("EXTRA_IS_PARENT_UNLOCK_ALLOWED", false)
+        currentBlockedPackage = packageName
 
         val isFocusActive = FocusEngine.instance.isFocusActive
         val blockedCount = FocusEngine.instance.blockedAttemptsCount
@@ -127,28 +171,13 @@ class BlockActivity : ComponentActivity() {
             }
         }
 
-        val appImageView = ImageView(this).apply {
+        appImageView = ImageView(this).apply {
             val iconSize = (56 * density).toInt()
             layoutParams = FrameLayout.LayoutParams(iconSize, iconSize).apply {
                 gravity = Gravity.CENTER
             }
             scaleType = ImageView.ScaleType.FIT_CENTER
-
-            var appIcon: android.graphics.drawable.Drawable? = null
-            if (!packageName.isNullOrBlank()) {
-                try {
-                    val d = packageManager.getApplicationIcon(packageName).mutate()
-                    val matrix = ColorMatrix().apply { setSaturation(0f) }
-                    d.colorFilter = ColorMatrixColorFilter(matrix)
-                    appIcon = d
-                } catch (_: Exception) {}
-            }
-
-            if (appIcon != null) {
-                setImageDrawable(appIcon)
-            } else {
-                setImageDrawable(ContextCompat.getDrawable(this@BlockActivity, R.drawable.ic_globe))
-            }
+            loadAppIcon(packageName)
         }
         iconTile.addView(appImageView)
 
@@ -178,8 +207,8 @@ class BlockActivity : ComponentActivity() {
         centerContainer.addView(illustrationFrame)
 
         // Title
-        val titleTextView = TextView(this).apply {
-            text = title
+        titleTextView = TextView(this).apply {
+            this.text = title
             setTextColor(Color.WHITE)
             textSize = 28f
             typeface = Typeface.DEFAULT_BOLD
@@ -191,8 +220,8 @@ class BlockActivity : ComponentActivity() {
         centerContainer.addView(titleTextView)
 
         // Subtitle
-        val subtitleTextView = TextView(this).apply {
-            text = subtitle
+        subtitleTextView = TextView(this).apply {
+            this.text = subtitle
             setTextColor(Color.parseColor("#8A8A8A"))
             textSize = 15f
             gravity = Gravity.CENTER
@@ -221,7 +250,7 @@ class BlockActivity : ComponentActivity() {
             }
         }
 
-        val quoteTextView = TextView(this).apply {
+        quoteTextView = TextView(this).apply {
             text = MOTIVATIONAL_QUOTES.first()
             setTextColor(Color.WHITE)
             textSize = 15.5f
@@ -230,7 +259,7 @@ class BlockActivity : ComponentActivity() {
         }
         motivationCard.addView(quoteTextView)
 
-        val statsTextView = TextView(this).apply {
+        statsTextView = TextView(this).apply {
             text = "Blocked $blockedCount times this session"
             setTextColor(Color.parseColor("#8A8A8A"))
             textSize = 13.5f
@@ -263,6 +292,32 @@ class BlockActivity : ComponentActivity() {
             }
         }
 
+        if (isParentUnlockAllowed) {
+            val parentUnlockButton = Button(this).apply {
+                text = "Parent unlock"
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                typeface = Typeface.DEFAULT_BOLD
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 26 * density
+                    setColor(Color.TRANSPARENT)
+                    setStroke((1 * density).toInt(), Color.parseColor("#3A3A3A"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    (52 * density).toInt()
+                ).apply {
+                    setMargins((8 * density).toInt(), 0, (8 * density).toInt(), (12 * density).toInt())
+                }
+                setOnClickListener {
+                    FocalRepository.instance.showParentUnlockScreen = true
+                    navigateToChildHomeAndFinish()
+                }
+            }
+            buttonsContainer.addView(parentUnlockButton)
+        }
+
         val primaryBtnText = if (isFocusActive) "Back to focus" else "Go back"
         val backButton = Button(this).apply {
             text = primaryBtnText
@@ -282,14 +337,7 @@ class BlockActivity : ComponentActivity() {
                 setMargins((8 * density).toInt(), 0, (8 * density).toInt(), 0)
             }
             setOnClickListener {
-                try {
-                    val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                        addCategory(Intent.CATEGORY_HOME)
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    startActivity(homeIntent)
-                } catch (_: Exception) {}
-                finish()
+                navigateToChildHomeAndFinish()
             }
         }
         buttonsContainer.addView(backButton)
@@ -297,16 +345,124 @@ class BlockActivity : ComponentActivity() {
         rootLayout.addView(contentLayout)
 
         setContentView(rootLayout)
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                navigateToChildHomeAndFinish()
+            }
+        })
+
+        // Real-time flow monitor: if focus ends while block screen is open, close it immediately and open Child Home
+        lifecycleScope.launch {
+            ProtectionStateRepository.instance.state.collect { pState ->
+                if (!pState.focusActive && !isFinishing) {
+                    navigateToChildHomeAndFinish()
+                }
+            }
+        }
     }
 
-    override fun onBackPressed() {
-        try {
-            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_HOME)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    override fun onResume() {
+        super.onResume()
+        isShowing = true
+        activeInstance = this
+
+        if (!FocusEngine.instance.isFocusActive && !isFinishing) {
+            navigateToChildHomeAndFinish()
+            return
+        }
+
+        focusMonitorJob?.cancel()
+        focusMonitorJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(250)
+                if (!FocusEngine.instance.isFocusActive && !isFinishing) {
+                    navigateToChildHomeAndFinish()
+                    break
+                }
             }
-            startActivity(homeIntent)
-        } catch (_: Exception) {}
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        focusMonitorJob?.cancel()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        isShowing = false
+        if (activeInstance == this) {
+            activeInstance = null
+        }
+        currentBlockedPackage = null
+        focusMonitorJob?.cancel()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        updateContentFromIntent(intent)
+    }
+
+    private fun updateContentFromIntent(intent: Intent) {
+        val title = intent.getStringExtra("EXTRA_TITLE") ?: intent.getStringExtra("EXTRA_TARGET_NAME") ?: "App is blocked"
+        val subtitle = intent.getStringExtra("EXTRA_SUBTITLE") ?: intent.getStringExtra("EXTRA_POLICY_NAME") ?: "Protected by FOCAL · ask a parent"
+        val pkg = intent.getStringExtra("EXTRA_PACKAGE_NAME")
+
+        currentBlockedPackage = pkg
+        titleTextView?.text = title
+        subtitleTextView?.text = subtitle
+
+        val isFocusActive = FocusEngine.instance.isFocusActive
+        val blockedCount = FocusEngine.instance.blockedAttemptsCount
+        if (isFocusActive) {
+            statsTextView?.visibility = View.VISIBLE
+            statsTextView?.text = "Blocked $blockedCount times this session"
+        } else {
+            statsTextView?.visibility = View.GONE
+        }
+
+        loadAppIcon(pkg)
+    }
+
+    private fun loadAppIcon(pkg: String?) {
+        var appIcon: android.graphics.drawable.Drawable? = null
+        if (!pkg.isNullOrBlank()) {
+            try {
+                val d = packageManager.getApplicationIcon(pkg).mutate()
+                val matrix = ColorMatrix().apply { setSaturation(0f) }
+                d.colorFilter = ColorMatrixColorFilter(matrix)
+                appIcon = d
+            } catch (_: Exception) {}
+        }
+
+        if (appIcon != null) {
+            appImageView?.setImageDrawable(appIcon)
+        } else {
+            appImageView?.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_globe))
+        }
+    }
+
+    fun navigateToChildHomeAndFinish() {
+        try {
+            val intent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("open", "child_home")
+            }
+            startActivity(intent)
+            @Suppress("DEPRECATION")
+            overridePendingTransition(0, 0)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start MainActivity with open=child_home: ${e.message}", e)
+        }
         finish()
+        @Suppress("DEPRECATION")
+        overridePendingTransition(0, 0)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        navigateToChildHomeAndFinish()
     }
 }

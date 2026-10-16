@@ -60,6 +60,7 @@ class FocusEngine private constructor() {
         sessionState = SessionState.IDLE
         currentSession = null
         remainingSeconds = 0
+        todayFocusMinutes = repository.childrenList.find { it.id == "child_1" || it.userId == repository.currentUser.id }?.todayFocusMinutes ?: 135
         checkAndUpdatePermissions()
     }
 
@@ -192,26 +193,59 @@ class FocusEngine private constructor() {
     private fun startTimer() {
         timerJob?.cancel()
         timerJob = scope.launch {
+            var clockChangeLogged = false
             while (isActive && sessionState == SessionState.ACTIVE) {
-                delay(1000)
-                val session = currentSession
-                if (session != null) {
-                    val remaining = maxOf(0L, (session.endTimeMillis - currentTimeMillis()) / 1000L)
-                    remainingSeconds = remaining.toInt()
-                    currentSession = session.copy(
-                        remainingSeconds = remainingSeconds
-                    )
-                    if (remaining <= 0L) {
-                        onTimerExpired()
-                        break
+                val session = currentSession ?: break
+                val nowElapsed = com.focal.app.streak.getDeviceElapsedRealtime()
+                val nowWall = currentTimeMillis()
+
+                // Check after reboot: elapsedRealtime resets to near 0
+                if (session.startElapsedRealtime > 0L && nowElapsed < session.startElapsedRealtime) {
+                    val wallRemaining = session.endTimeMillis - nowWall
+                    if (wallRemaining <= 0L) {
+                        // Clock jumped forward or past remaining time after reboot: keep focus active and log event
+                        if (!clockChangeLogged) {
+                            clockChangeLogged = true
+                            com.focal.app.data.ActivityRepository.instance.recordEvent(
+                                type = com.focal.app.data.ActivityEventType.CLOCK_CHANGED,
+                                childId = session.userId,
+                                details = "Device clock was changed during active focus session",
+                                metadata = mapOf("reason" to "Clock jump detected after reboot")
+                            )
+                        }
+                        // Re-anchor to current elapsed and keep remaining active
+                        val keepDurationMs = (session.targetDurationMinutes * 60 * 1000L).coerceAtLeast(300_000L)
+                        val newEndsAt = nowWall + keepDurationMs
+                        currentSession = session.copy(
+                            startElapsedRealtime = nowElapsed,
+                            startTimeMillis = nowWall,
+                            endTimeMillis = newEndsAt
+                        )
                     }
-                } else {
-                    remainingSeconds--
-                    if (remainingSeconds <= 0) {
-                        onTimerExpired()
-                        break
+                } else if (session.startElapsedRealtime > 0L && nowElapsed >= session.startElapsedRealtime) {
+                    // Check if wall clock jumped forward while running (date/time manually adjusted)
+                    val actualElapsed = nowElapsed - session.startElapsedRealtime
+                    val wallElapsed = nowWall - session.startTimeMillis
+                    if (wallElapsed - actualElapsed > 60_000L && !clockChangeLogged) {
+                        clockChangeLogged = true
+                        com.focal.app.data.ActivityRepository.instance.recordEvent(
+                            type = com.focal.app.data.ActivityEventType.CLOCK_CHANGED,
+                            childId = session.userId,
+                            details = "Device clock was changed during active focus session",
+                            metadata = mapOf("reason" to "Clock adjustment detected")
+                        )
                     }
                 }
+
+                val remainingMs = session.getRemainingMillis(nowElapsed, nowWall)
+                remainingSeconds = (remainingMs / 1000L).toInt()
+                currentSession = session.copy(remainingSeconds = remainingSeconds)
+                if (remainingMs <= 0L) {
+                    onTimerExpired()
+                    break
+                }
+                val delayTime = (1000 - nowElapsed % 1000).coerceIn(100L, 1000L)
+                delay(delayTime)
             }
         }
     }
@@ -243,6 +277,7 @@ class FocusEngine private constructor() {
         emergencyExitsCount = 0
 
         val now = currentTimeMillis()
+        val nowElapsed = com.focal.app.streak.getDeviceElapsedRealtime()
         val endsAt = now + totalSeconds * 1000L
         val newSession = FocusSession(
             id = "sess_${now}",
@@ -261,7 +296,9 @@ class FocusEngine private constructor() {
             emergencyExits = 0,
             focusScore = 85,
             blockedAppsCount = policy.blockedApps.size,
-            blockedWebsitesCount = policy.blockedWebsites.size
+            blockedWebsitesCount = policy.blockedWebsites.size,
+            endTimeMillis = endsAt,
+            startElapsedRealtime = nowElapsed
         )
 
         currentSession = newSession
@@ -269,6 +306,8 @@ class FocusEngine private constructor() {
 
         // Persist session timing locally
         com.focal.app.data.FocalLocalStorage.saveLong("KEY_FOCUS_ENDS_AT_MILLIS", endsAt)
+        com.focal.app.data.FocalLocalStorage.saveLong("KEY_FOCUS_START_ELAPSED", nowElapsed)
+        com.focal.app.data.FocalLocalStorage.saveLong("KEY_FOCUS_START_MILLIS", now)
 
         // Update child profile in parent repository
         val childIdx = repository.childrenList.indexOfFirst { it.userId == user.id || it.id == "child_1" || it.name.equals(user.name, ignoreCase = true) }
@@ -477,6 +516,13 @@ class FocusEngine private constructor() {
         sessionState = SessionState.ENDING
         timerJob?.cancel()
 
+        val endedAt = currentTimeMillis()
+        val actualDurationMs = (endedAt - session.startTimeMillis).coerceAtLeast(0L)
+        val elapsedMinutes = (actualDurationMs / 60000L).toInt()
+
+        // Accumulate actual focused time today
+        todayFocusMinutes += elapsedMinutes
+
         // Push completion telemetry to Cloud Sync Engine
         com.focal.app.data.FocalSyncEngine.instance.reportChildTelemetry(
             childId = session.userId,
@@ -486,7 +532,6 @@ class FocusEngine private constructor() {
             lastAttemptedApp = null
         )
 
-        val elapsedMinutes = (session.targetDurationMinutes - (remainingSeconds / 60)).coerceAtLeast(1)
         val score = (80 + (distractionsPrevented * 2) - (emergencyExitsCount * 10)).coerceIn(50, 99)
 
         val completedSession = session.copy(
@@ -495,7 +540,8 @@ class FocusEngine private constructor() {
             blockedAttempts = blockedAttemptsCount,
             distractionsPrevented = distractionsPrevented,
             emergencyExits = emergencyExitsCount,
-            focusScore = score
+            focusScore = score,
+            endedAtMillis = endedAt
         )
 
         lastCompletedSummary = completedSession
@@ -504,20 +550,47 @@ class FocusEngine private constructor() {
         sessionState = SessionState.COMPLETED
 
         com.focal.app.data.FocalLocalStorage.remove("KEY_FOCUS_ENDS_AT_MILLIS")
+        com.focal.app.data.FocalLocalStorage.remove("KEY_FOCUS_START_ELAPSED")
+        com.focal.app.data.FocalLocalStorage.remove("KEY_FOCUS_START_MILLIS")
 
         val childIdx = repository.childrenList.indexOfFirst { it.userId == session.userId || it.id == "child_1" || it.name.equals(session.childName, ignoreCase = true) }
         if (childIdx >= 0) {
             repository.childrenList[childIdx] = repository.childrenList[childIdx].copy(
                 isFocusing = false,
                 focusEndsAtMillis = 0L,
-                remainingMinutes = 0
+                remainingMinutes = 0,
+                todayFocusMinutes = todayFocusMinutes
             )
+        }
+
+        if (triggerType != TriggerType.EMERGENCY_OVERRIDE) {
+            repository.expirePendingEmergencyRequests(session.userId)
         }
 
         com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
             active = false,
             endsAtElapsed = 0L,
             policy = com.focal.app.model.FocusPolicyData()
+        )
+
+        // Record streak session
+        val streakReason = when (triggerType) {
+            TriggerType.TIMER_EXPIRED -> com.focal.app.streak.StreakEndReason.TIMER_FINISHED
+            TriggerType.SCHEDULED -> com.focal.app.streak.StreakEndReason.SCHEDULE_ENDED
+            TriggerType.REMOTE_PARENT -> com.focal.app.streak.StreakEndReason.PARENT_REMOTE_ENDED
+            TriggerType.NFC, TriggerType.QR -> com.focal.app.streak.StreakEndReason.CARD_EARLY
+            TriggerType.EMERGENCY_OVERRIDE -> com.focal.app.streak.StreakEndReason.EMERGENCY_EXIT
+            else -> com.focal.app.streak.StreakEndReason.CARD_EARLY
+        }
+        com.focal.app.streak.StreakRepository.instance.addSession(
+            com.focal.app.streak.StreakSessionRecord(
+                id = completedSession.id,
+                startTimeMillis = session.startTimeMillis,
+                endTimeMillis = endedAt,
+                targetDurationMinutes = session.targetDurationMinutes,
+                endReason = streakReason,
+                remainingSecondsAtEnd = 0
+            )
         )
 
         // Notify controller
@@ -541,43 +614,9 @@ class FocusEngine private constructor() {
         return Result.success(completedSession)
     }
 
-    // Handle timer expiration
+    // Handle timer expiration (uses the exact same code path as End Focus)
     private fun onTimerExpired() {
-        val session = currentSession ?: return
-        sessionState = SessionState.EXPIRED
-        lastCompletedSummary = session.copy(
-            status = SessionState.COMPLETED,
-            remainingSeconds = 0,
-            focusScore = 95
-        )
-        currentSession = null
-        remainingSeconds = 0
-        sessionState = SessionState.COMPLETED
-
-        com.focal.app.data.FocalLocalStorage.remove("KEY_FOCUS_ENDS_AT_MILLIS")
-
-        val childIdx = repository.childrenList.indexOfFirst { it.userId == session.userId || it.id == "child_1" || it.name.equals(session.childName, ignoreCase = true) }
-        if (childIdx >= 0) {
-            repository.childrenList[childIdx] = repository.childrenList[childIdx].copy(
-                isFocusing = false,
-                focusEndsAtMillis = 0L,
-                remainingMinutes = 0
-            )
-        }
-
-        // Log Activity Event
-        com.focal.app.data.ActivityRepository.instance.recordEvent(
-            type = com.focal.app.data.ActivityEventType.FOCUS_COMPLETED,
-            childId = session.userId,
-            details = "${session.childName} completed '${session.policyName}' (${session.targetDurationMinutes} min)",
-            metadata = mapOf("policy" to session.policyName, "duration" to session.targetDurationMinutes.toString())
-        )
-
-        com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
-            active = false,
-            endsAtElapsed = 0L,
-            policy = com.focal.app.model.FocusPolicyData()
-        )
+        endFocus(TriggerType.TIMER_EXPIRED, "TIMER_EXPIRED")
     }
 
     // Trigger opening a blocked app / website in real native service or simulation

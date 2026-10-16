@@ -73,9 +73,17 @@ class ProtectionEngineTest {
 
     @Test
     fun test7_SettingsInFocusLocked() {
-        val settings = WindowInfo(packageName = "com.android.settings")
+        val settings = WindowInfo(packageName = "com.android.settings", windowTitle = "Accessibility", fullText = "Accessibility")
         val res = ProtectionEngine.decide(settings, baseState, 1000L)
         assertEquals(DecisionType.LOCK_SETTINGS, res.type)
+        assertEquals('f', res.ruleLetter)
+    }
+
+    @Test
+    fun test7b_GeneralSettingsInFocusAllowed() {
+        val settings = WindowInfo(packageName = "com.android.settings", windowTitle = "Wi-Fi", fullText = "Wi-Fi Networks")
+        val res = ProtectionEngine.decide(settings, baseState, 1000L)
+        assertEquals(DecisionType.ALLOW, res.type)
         assertEquals('f', res.ruleLetter)
     }
 
@@ -91,7 +99,7 @@ class ProtectionEngineTest {
     @Test
     fun test9_SettingsOutsideFocusAlwaysModeLocked() {
         val idleStateAlways = baseState.copy(focusActive = false, lockSettingsMode = LockSettingsMode.ALWAYS)
-        val settings = WindowInfo(packageName = "com.android.settings")
+        val settings = WindowInfo(packageName = "com.android.settings", windowTitle = "Date & time", fullText = "Date & time")
         val res = ProtectionEngine.decide(settings, idleStateAlways, 1000L)
         assertEquals(DecisionType.LOCK_SETTINGS, res.type)
         assertEquals('f', res.ruleLetter)

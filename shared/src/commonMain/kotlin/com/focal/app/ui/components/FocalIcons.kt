@@ -1927,6 +1927,72 @@ object FocalIcons {
             }
         }.build()
     }
+
+    val Copy: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Copy",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            path(
+                stroke = SolidColor(Color.White),
+                strokeLineWidth = 1.75f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // Front rectangle
+                moveTo(9f, 9f)
+                lineTo(19f, 9f)
+                curveTo(20.1f, 9f, 21f, 9.9f, 21f, 11f)
+                lineTo(21f, 19f)
+                curveTo(21f, 20.1f, 20.1f, 21f, 19f, 21f)
+                lineTo(9f, 21f)
+                curveTo(7.9f, 21f, 7f, 20.1f, 7f, 19f)
+                lineTo(7f, 11f)
+                curveTo(7f, 9.9f, 7.9f, 9f, 9f, 9f)
+                close()
+                // Back rectangle
+                moveTo(5f, 15f)
+                lineTo(4f, 15f)
+                curveTo(3.45f, 15f, 3f, 14.55f, 3f, 14f)
+                lineTo(3f, 5f)
+                curveTo(3f, 3.9f, 3.9f, 3f, 5f, 3f)
+                lineTo(14f, 3f)
+                curveTo(14.55f, 3f, 15f, 3.45f, 15f, 4f)
+                lineTo(15f, 5f)
+            }
+        }.build()
+    }
+
+    val Rupee: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Rupee",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            path(
+                stroke = SolidColor(Color.White),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(6f, 4.5f)
+                lineTo(18f, 4.5f)
+                moveTo(6f, 9f)
+                lineTo(18f, 9f)
+                moveTo(6f, 4.5f)
+                lineTo(11f, 4.5f)
+                curveTo(14.5f, 4.5f, 16.5f, 6.5f, 16.5f, 9.5f)
+                curveTo(16.5f, 12.5f, 14.5f, 14.5f, 11f, 14.5f)
+                lineTo(6f, 14.5f)
+                lineTo(17f, 21f)
+            }
+        }.build()
+    }
 }
 
 

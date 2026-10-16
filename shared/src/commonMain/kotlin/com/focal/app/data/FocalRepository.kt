@@ -101,8 +101,8 @@ class FocalRepository private constructor() {
 
     val childRahul = User(
         id = "user_rahul",
-        name = "Rahul Sharma",
-        email = "rahul@focal.io",
+        name = "Aarav",
+        email = "aarav@focal.io",
         phone = "+91 98765 43210",
         role = UserRole.CHILD,
         planType = PlanType.NFC,
@@ -284,8 +284,41 @@ class FocalRepository private constructor() {
         )
     )
 
-    // Registered NFC Cards (starts empty, cards added on this phone)
-    val nfcCards = mutableStateListOf<FocusCard>()
+    // Registered NFC Cards & Stock Inventory
+    val nfcCards = mutableStateListOf(
+        FocusCard(
+            id = "card_100001",
+            cardId = "Card 100001",
+            token = "TK_100001",
+            ownerParentId = "user_priya",
+            ownerId = "user_priya",
+            ownerName = "Priya Sharma",
+            assignedChildId = "child_1",
+            status = CardStatus.ASSIGNED,
+            registeredAt = "12 Sep 2026",
+            createdAt = "12 Sep 2026",
+            nfcUid = "04:A1:B2:C3:D4:E5:F6",
+            ndefPayload = "FOCUSCARD:TK_100001",
+            tapCount = 23,
+            lastTapTime = "10:02"
+        ),
+        FocusCard(
+            id = "card_100002",
+            cardId = "Card 100002",
+            token = "TK_100002",
+            ownerParentId = null,
+            ownerId = null,
+            ownerName = null,
+            assignedChildId = null,
+            status = CardStatus.IN_STOCK,
+            registeredAt = "16 Oct 2026",
+            createdAt = "16 Oct 2026",
+            nfcUid = "04:B2:C3:D4:E5:F6:A1",
+            ndefPayload = "FOCUSCARD:TK_100002",
+            tapCount = 0,
+            lastTapTime = null
+        )
+    )
 
     // QR Tokens
     val qrTokens = mutableStateListOf(
@@ -386,7 +419,7 @@ class FocalRepository private constructor() {
             userId = "user_priya",
             type = "EMERGENCY_REQUEST",
             title = "Emergency Exit Request",
-            message = "Rahul requested an early exit: 'Need to submit school science assignment'",
+            message = "Aarav requested an early exit: 'Need to submit school science assignment'",
             timestamp = "10m ago"
         ),
         NotificationItem(
@@ -394,7 +427,7 @@ class FocalRepository private constructor() {
             userId = "user_priya",
             type = "PROTECTION_OFF",
             title = "Focus Protection Disabled",
-            message = "Rahul's phone disabled Accessibility Service permission.",
+            message = "Aarav's phone disabled Accessibility Service permission.",
             timestamp = "15m ago"
         ),
         NotificationItem(
@@ -418,7 +451,7 @@ class FocalRepository private constructor() {
             userId = "user_rahul",
             type = "FOCUS_STARTED",
             title = "Session Started",
-            message = "Rahul started Study Mode via NFC card FC0001",
+            message = "Aarav started Study Mode via NFC card FC0001",
             timestamp = "2h ago"
         ),
         NotificationItem(
@@ -426,7 +459,7 @@ class FocalRepository private constructor() {
             userId = "user_rahul",
             type = "FOCUS_ENDED",
             title = "Session Completed",
-            message = "Rahul finished Study Mode. Focus Score: 92",
+            message = "Aarav finished Study Mode. Focus Score: 92",
             timestamp = "3h ago"
         )
     )
@@ -980,48 +1013,77 @@ class FocalRepository private constructor() {
     }
 
     // Emergency Exit Request (Child -> Controller)
-    fun submitEmergencyExitRequest(sessionId: String, reason: String): EmergencyExitRequest {
+    fun submitEmergencyExitRequest(
+        sessionId: String,
+        reason: String,
+        note: String = "",
+        childId: String = currentUser.id,
+        childName: String = currentUser.name
+    ): EmergencyExitRequest {
+        val targetChildId = childId.ifBlank { "child_1" }
+        val targetChildName = childName.ifBlank { "Aarav" }
+
+        // 1. Any older PENDING request for that child -> CANCELLED
+        emergencyRequests.forEachIndexed { index, existingReq ->
+            if (existingReq.status == "PENDING" && (existingReq.childId == targetChildId || targetChildId == "child_1" || existingReq.childId == "child_1")) {
+                emergencyRequests[index] = existingReq.copy(status = "CANCELLED")
+            }
+        }
+
+        // 2. New request -> new UUID id
+        val newId = com.focal.app.model.generateUuid()
+        val now = currentTimeMillis()
         val req = EmergencyExitRequest(
-            id = "req_${currentTimeMillis()}",
+            id = newId,
             sessionId = sessionId,
-            childId = currentUser.id,
-            childName = currentUser.name,
+            childId = targetChildId,
+            childName = targetChildName,
             reason = reason,
+            note = note,
             requestedAt = "Just now",
-            requestedAtMillis = currentTimeMillis(),
+            requestedAtMillis = now,
             status = "PENDING"
         )
         emergencyRequests.add(0, req)
+        EmergencyExitRepository.instance.notifyPending(req)
+
+        val fullDetail = if (note.isNotBlank()) "$reason: $note" else reason
         ActivityRepository.instance.recordEvent(
             type = ActivityEventType.EXIT_REQUESTED,
-            childId = currentUser.id,
-            details = "${currentUser.name} requested early exit: '${reason.ifEmpty { "No reason provided" }}'",
-            metadata = mapOf("sessionId" to sessionId, "reason" to reason)
+            childId = targetChildId,
+            details = "$targetChildName requested early exit: '${fullDetail.ifEmpty { "No reason provided" }}'",
+            metadata = mapOf("requestId" to newId, "sessionId" to sessionId, "reason" to reason, "note" to note)
         )
         notifications.add(0, NotificationItem(
             id = "notif_${currentTimeMillis()}",
             userId = controllerUser.id,
             type = "EMERGENCY_REQUEST",
             title = "Emergency Exit Request",
-            message = "${currentUser.name} requested early exit: '${reason.ifEmpty { "No reason provided" }}'",
+            message = "$targetChildName requested early exit: '${fullDetail.ifEmpty { "No reason provided" }}'",
             timestamp = "Just now"
         ))
         return req
     }
 
-    // Approve / Reject Emergency Exit (Controller)
+    // Approve / Decline Emergency Exit (Controller)
     fun resolveEmergencyRequest(requestId: String, approve: Boolean) {
         val index = emergencyRequests.indexOfFirst { it.id == requestId }
         if (index >= 0) {
             val req = emergencyRequests[index]
-            emergencyRequests[index] = req.copy(status = if (approve) "APPROVED" else "REJECTED")
+            val newStatus = if (approve) "APPROVED" else "DECLINED"
+            emergencyRequests[index] = req.copy(status = newStatus)
+
+            val parentName = controllerUser.name.ifBlank { "Parent" }
 
             if (approve) {
+                EmergencyExitRepository.instance.notifyApproved(requestId)
                 com.focal.app.engine.FocusEngine.instance.endFocusWithEmergency()
+            } else {
+                EmergencyExitRepository.instance.notifyDeclined(requestId, parentName)
             }
 
             val eventType = if (approve) ActivityEventType.EXIT_APPROVED else ActivityEventType.EXIT_DECLINED
-            val eventDetails = if (approve) "Parent Priya approved emergency exit for ${req.childName}" else "Parent Priya declined emergency exit for ${req.childName}"
+            val eventDetails = if (approve) "$parentName approved emergency exit for ${req.childName}" else "$parentName declined emergency exit for ${req.childName}"
             ActivityRepository.instance.recordEvent(
                 type = eventType,
                 childId = req.childId,
@@ -1034,10 +1096,29 @@ class FocalRepository private constructor() {
                 userId = req.childId,
                 type = if (approve) "EMERGENCY_APPROVED" else "EMERGENCY_REJECTED",
                 title = if (approve) "Exit Approved" else "Exit Declined",
-                message = if (approve) "Parent Priya approved your emergency exit." else "Declined — keep going!",
+                message = if (approve) "$parentName approved your emergency exit." else "$parentName said keep going!",
                 timestamp = "Just now"
             ))
         }
+    }
+
+    fun cancelEmergencyExitRequest(childId: String = currentUser.id, requestId: String? = null) {
+        val targetChildId = childId.ifBlank { "child_1" }
+        emergencyRequests.forEachIndexed { index, req ->
+            if (req.status == "PENDING" && (requestId == null || req.id == requestId) && (req.childId == targetChildId || targetChildId == "child_1" || req.childId == "child_1")) {
+                emergencyRequests[index] = req.copy(status = "CANCELLED")
+            }
+        }
+        EmergencyExitRepository.instance.reset()
+    }
+
+    fun expirePendingEmergencyRequests(childId: String? = null) {
+        emergencyRequests.forEachIndexed { index, req ->
+            if (req.status == "PENDING" && (childId == null || req.childId == childId || childId == "child_1" || req.childId == "child_1")) {
+                emergencyRequests[index] = req.copy(status = "EXPIRED")
+            }
+        }
+        EmergencyExitRepository.instance.reset()
     }
 
     fun checkEmergencyRequestExpirations() {
@@ -1209,6 +1290,13 @@ class FocalRepository private constructor() {
     // Parent Unlock Timer (Pauses settings guard for 10 minutes)
     var parentUnlockedUntilMs by mutableStateOf(0L)
     var showParentUnlockScreen by mutableStateOf(false)
+
+    // Trigger to navigate to Child Home (tab 0)
+    var requestNavigateToChildHomeCounter by mutableStateOf(0)
+
+    fun navigateToChildHome() {
+        requestNavigateToChildHomeCounter++
+    }
 
     fun isParentGuardUnlocked(): Boolean {
         return currentTimeMillis() < parentUnlockedUntilMs
@@ -1465,28 +1553,109 @@ class FocalRepository private constructor() {
 
     // Admin Console Data & Audit Logs
     val parentAccounts = mutableStateListOf(
-        ParentAccount("user_priya", "Priya Sharma", "priya@focal.io", listOf("child_1"), ParentSubscriptionStatus.TRIAL_3_MONTHS, 84, "2026-08-01")
+        ParentAccount(
+            id = "user_priya",
+            name = "Priya Sharma",
+            email = "priya@gmail.com",
+            childrenIds = listOf("child_1", "child_2"),
+            subscriptionStatus = ParentSubscriptionStatus.TRIAL_3_MONTHS,
+            trialDaysLeft = 62,
+            registeredDate = "Aug 2026"
+        ),
+        ParentAccount(
+            id = "user_rohit",
+            name = "Rohit Mehta",
+            email = "rohit.m@gmail.com",
+            childrenIds = listOf("child_3"),
+            subscriptionStatus = ParentSubscriptionStatus.ACTIVE_MONTHLY,
+            trialDaysLeft = 0,
+            registeredDate = "Sep 2026"
+        )
     )
 
     val children get() = childrenList
     val cards get() = nfcCards
 
     val auditLogs = mutableStateListOf(
-        AdminAuditLog("log_1", "admin@focal.io", "Initialized Demo", "Priya Sharma & Ananya", "Just now")
+        AdminAuditLog("log_1", "admin@focal.app", "Added card 100001 to stock", "Inventory", "2h ago"),
+        AdminAuditLog("log_2", "admin@focal.app", "Opened Priya Sharma", "Parent account", "Yesterday")
     )
 
     val adminDevices = mutableStateListOf(
-        AdminDeviceItem("dev_1", "Ananya", "Priya Sharma", "Android Phone", "Android 14", "1.2.0-demo", true, true, "1m ago", true, true, true, true)
+        AdminDeviceItem(
+            id = "dev_1",
+            childName = "Aarav",
+            parentName = "Priya Sharma",
+            deviceModel = "Realme",
+            osVersion = "Android 14",
+            appVersion = "1.2.0",
+            isOnline = true,
+            isProtectionActive = true,
+            lastHeartbeat = "1m",
+            isFocusing = true,
+            batteryPercent = 82,
+            accessibilityGranted = true,
+            overlayGranted = true,
+            deviceAdminGranted = true,
+            usageGranted = true,
+            notificationsGranted = true,
+            batteryUnrestricted = true
+        ),
+        AdminDeviceItem(
+            id = "dev_2",
+            childName = "Kiara",
+            parentName = "Priya Sharma",
+            deviceModel = "Samsung",
+            osVersion = "Android 14",
+            appVersion = "1.2.0",
+            isOnline = true,
+            isProtectionActive = false,
+            lastHeartbeat = "40m",
+            isFocusing = false,
+            batteryPercent = 64,
+            accessibilityGranted = false,
+            overlayGranted = true,
+            deviceAdminGranted = true,
+            usageGranted = true,
+            notificationsGranted = true,
+            batteryUnrestricted = true
+        )
     )
 
     fun logAdminAction(action: String, target: String) {
         auditLogs.add(0, AdminAuditLog(
             id = "log_${currentTimeMillis()}",
-            adminId = adminUser.email,
+            adminId = "admin@focal.app",
             action = action,
             target = target,
             timestamp = "Just now"
         ))
+    }
+
+    fun addInventoryCard(serial: String, activationCode: String): FocusCard {
+        val trimmedSerial = serial.trim()
+        val formattedSerial = if (trimmedSerial.startsWith("Card", ignoreCase = true)) trimmedSerial else "Card $trimmedSerial"
+        val trimmedCode = activationCode.trim()
+        val formattedCode = if (trimmedCode.startsWith("TK_")) trimmedCode else "TK_$trimmedCode"
+        val newCard = FocusCard(
+            id = "card_${currentTimeMillis()}",
+            cardId = formattedSerial,
+            token = formattedCode,
+            ownerParentId = null,
+            ownerId = null,
+            ownerName = null,
+            assignedChildId = null,
+            status = CardStatus.IN_STOCK,
+            registeredAt = "Today",
+            createdAt = "Today",
+            nfcUid = "04:C3:D4:E5:F6:A1:B2",
+            ndefPayload = "FOCUSCARD:$formattedCode",
+            tapCount = 0,
+            lastTapTime = null
+        )
+        nfcCards.add(0, newCard)
+        logAdminAction("Added $formattedSerial to stock", "Inventory")
+        return newCard
     }
 
     fun adminExtendTrial(userId: String, days: Int = 14) {
@@ -1516,11 +1685,11 @@ class FocalRepository private constructor() {
     }
 
     fun adminRevokeCard(cardId: String) {
-        val card = nfcCards.find { it.cardId.equals(cardId, ignoreCase = true) }
-        if (card != null) {
-            val idx = nfcCards.indexOf(card)
-            nfcCards[idx] = card.copy(status = CardStatus.DEACTIVATED, ownerId = null, ownerName = null)
-            logAdminAction("Revoked card", "Card $cardId")
+        val idx = nfcCards.indexOfFirst { it.cardId.equals(cardId, ignoreCase = true) }
+        if (idx >= 0) {
+            val card = nfcCards[idx]
+            nfcCards[idx] = card.copy(status = CardStatus.REVOKED)
+            logAdminAction("Revoked card", card.cardId)
         }
     }
 

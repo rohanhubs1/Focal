@@ -76,6 +76,7 @@ interface PairingRepository {
 
     companion object {
         val instance: PairingRepository get() = DefaultPairingRepository.instance
+        const val KEY_PAIRED_PARENT_NAME = "KEY_PAIRED_PARENT_NAME"
     }
 }
 
@@ -102,7 +103,7 @@ class DefaultPairingRepository : PairingRepository {
 
         private const val KEY_PAIRED_IS_PAIRED = "KEY_PAIRED_AS_CHILD"
         private const val KEY_PAIRED_CHILD_NAME = "KEY_PAIRED_CHILD_NAME"
-        private const val KEY_PAIRED_PARENT_NAME = "KEY_PAIRED_PARENT_NAME"
+        const val KEY_PAIRED_PARENT_NAME = "KEY_PAIRED_PARENT_NAME"
         private const val KEY_PAIRED_CARD_ID = "KEY_PAIRED_CARD_ID"
     }
 

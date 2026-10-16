@@ -42,6 +42,7 @@ expect object PlatformPermissionsHelper {
     fun setMaxBrightness(enable: Boolean)
     fun shareQrCode(title: String, payload: String)
     fun printQrCode(title: String, payload: String)
+    fun testBlockScreen()
 }
 
 @androidx.compose.runtime.Composable

@@ -7,6 +7,23 @@ actual fun getDeviceTimeZoneOffsetMillis(): Long {
     return TimeZone.getDefault().getOffset(System.currentTimeMillis()).toLong()
 }
 
+actual fun getDeviceCurrentTimeMillis(): Long {
+    return System.currentTimeMillis()
+}
+
+actual fun formatTimeLocal(epochMillis: Long): String {
+    val formatter = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
+    return formatter.format(java.util.Date(epochMillis))
+}
+
+actual fun getDeviceElapsedRealtime(): Long {
+    return try {
+        android.os.SystemClock.elapsedRealtime()
+    } catch (_: Throwable) {
+        System.nanoTime() / 1_000_000L
+    }
+}
+
 actual fun getDeviceCurrentTime(): CurrentDeviceTime {
     val cal = Calendar.getInstance()
     val dayStr = when (cal.get(Calendar.DAY_OF_WEEK)) {

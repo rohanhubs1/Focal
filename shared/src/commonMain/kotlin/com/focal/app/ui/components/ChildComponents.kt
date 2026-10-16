@@ -19,6 +19,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.draw.alpha
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.*
@@ -756,6 +760,7 @@ object FocalSheetTracker {
 
     fun onSheetShown() { sheetCount++ }
     fun onSheetHidden() { sheetCount = (sheetCount - 1).coerceAtLeast(0) }
+    fun reset() { sheetCount = 0 }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -772,6 +777,13 @@ fun ChildBottomSheet(
         }
     }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    LaunchedEffect(sheetState) {
+        if (!sheetState.isVisible) {
+            try {
+                sheetState.show()
+            } catch (_: Throwable) {}
+        }
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -1182,6 +1194,15 @@ fun TapCardBottomSheet(
 // Opens from "End focus" on Home (focus active).
 // ModalBottomSheet: gradient #141414→#0A0A0A, top radius 32, #2A2A2A top border, drag handle.
 // =========================================================================
+enum class EndFocusSheetState {
+    IDLE,
+    SENDING,
+    SENT,
+    APPROVED,
+    DENIED,
+    FAILED
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EndFocusBottomSheet(
@@ -1190,13 +1211,34 @@ fun EndFocusBottomSheet(
     onDismiss: () -> Unit,
     onCardTapped: () -> Unit,
     cardListeningSubtitle: String = "Listening… the same card ends focus",
-    onRequestEmergencyExit: (String) -> Unit = {},
-    isRequestPending: Boolean = false,
-    parentName: String = "Mom",
+    onRequestEmergencyExit: (reason: String, note: String) -> Unit = { _, _ -> },
+    onCancelEmergencyExit: () -> Unit = {},
+    parentName: String = "Parent",
+    pendingRequest: com.focal.app.model.EmergencyExitRequest? = null,
+    latestRequest: com.focal.app.model.EmergencyExitRequest? = null,
     modifier: Modifier = Modifier
 ) {
     val typography = LocalChildTypography.current
+    val coroutineScope = rememberCoroutineScope()
     var selectedReason by remember { mutableStateOf<String?>(null) }
+    var otherNote by remember { mutableStateOf("") }
+    var sheetState by remember {
+        mutableStateOf(
+            if (pendingRequest != null) EndFocusSheetState.SENT else EndFocusSheetState.IDLE
+        )
+    }
+
+    LaunchedEffect(latestRequest?.id, latestRequest?.status) {
+        val req = latestRequest ?: return@LaunchedEffect
+        if (req.isApproved && (sheetState == EndFocusSheetState.SENT || sheetState == EndFocusSheetState.SENDING)) {
+            sheetState = EndFocusSheetState.APPROVED
+            onDismiss()
+        } else if (req.isDeclined && sheetState == EndFocusSheetState.SENT) {
+            sheetState = EndFocusSheetState.DENIED
+        } else if (req.isPending && sheetState == EndFocusSheetState.IDLE) {
+            sheetState = EndFocusSheetState.SENT
+        }
+    }
 
     val formattedTimeLeft = when {
         remainingMinutes >= 60 && remainingMinutes % 60 == 0 -> "${remainingMinutes / 60}h"
@@ -1210,6 +1252,16 @@ fun EndFocusBottomSheet(
         "Emergency",
         "Other"
     )
+
+    // In DENIED state: show "<parent> said keep going" for 4s, back to idle
+    if (sheetState == EndFocusSheetState.DENIED) {
+        LaunchedEffect(Unit) {
+            delay(4000L)
+            sheetState = EndFocusSheetState.IDLE
+            selectedReason = null
+            otherNote = ""
+        }
+    }
 
     ChildBottomSheet(
         onDismiss = onDismiss,
@@ -1342,23 +1394,24 @@ fun EndFocusBottomSheet(
                 val isSelected = selectedReason == reason
                 Box(
                     modifier = Modifier
+                        .heightIn(min = 44.dp)
                         .clip(CircleShape)
-                        .background(if (isSelected) ChildColors.IconCircleBg else Color.Transparent)
+                        .background(if (isSelected) Color(0xFF171717) else Color.Transparent)
                         .border(
-                            width = 1.dp,
-                            color = if (isSelected) Color.White else ChildColors.BorderStrong,
+                            width = if (isSelected) 1.5.dp else 1.dp,
+                            color = if (isSelected) Color.White else Color(0xFF262626),
                             shape = CircleShape
                         )
-                        .clickable(enabled = !isRequestPending) {
+                        .clickable(enabled = sheetState == EndFocusSheetState.IDLE || sheetState == EndFocusSheetState.FAILED) {
                             selectedReason = if (isSelected) null else reason
                         }
-                        .padding(horizontal = 16.dp, vertical = 9.dp),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = reason,
                         style = typography.body.copy(
-                            color = if (isSelected) Color.White else ChildColors.ChipTextUnselected,
+                            color = if (isSelected) Color.White else Color(0xFFA3A3A3),
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                             fontSize = 14.sp
                         ),
@@ -1369,75 +1422,271 @@ fun EndFocusBottomSheet(
             }
         }
 
+        // "Other" selected: show one-line text field "Tell your parent why" (max 80 chars)
+        if (selectedReason == "Other") {
+            Spacer(Modifier.height(12.dp))
+            BasicTextField(
+                value = otherNote,
+                onValueChange = { if (it.length <= 80) otherNote = it },
+                singleLine = true,
+                textStyle = typography.body.copy(color = Color.White, fontSize = 14.sp),
+                cursorBrush = SolidColor(Color.White),
+                decorationBox = { innerTextField ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF141414))
+                            .border(1.dp, Color(0xFF262626), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (otherNote.isEmpty()) {
+                            Text(
+                                text = "Tell your parent why",
+                                style = typography.body.copy(color = Color(0xFF6B6B6B), fontSize = 14.sp)
+                            )
+                        }
+                        innerTextField()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
         Spacer(Modifier.height(16.dp))
 
-        // Pending GlassCard (if request sent)
-        if (isRequestPending) {
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                radius = 16.dp,
-                padding = 16.dp
-            ) {
-                Row(
+        // State Cards: SENT, FAILED, or DENIED
+        when (sheetState) {
+            EndFocusSheetState.SENT -> {
+                GlassCard(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    radius = 16.dp,
+                    padding = 16.dp
                 ) {
-                    val infiniteTransition = rememberInfiniteTransition(label = "pendingSpinner")
-                    val angle by infiniteTransition.animateFloat(
-                        initialValue = 0f,
-                        targetValue = 360f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(1000, easing = LinearEasing),
-                            repeatMode = RepeatMode.Restart
-                        ),
-                        label = "spinnerAngle"
-                    )
-                    Canvas(modifier = Modifier.size(24.dp)) {
-                        rotate(angle) {
-                            drawArc(
-                                color = Color.White,
-                                startAngle = 0f,
-                                sweepAngle = 270f,
-                                useCenter = false,
-                                style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val infiniteTransition = rememberInfiniteTransition(label = "pendingSpinner")
+                        val angle by infiniteTransition.animateFloat(
+                            initialValue = 0f,
+                            targetValue = 360f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(1000, easing = LinearEasing),
+                                repeatMode = RepeatMode.Restart
+                            ),
+                            label = "spinnerAngle"
+                        )
+                        Canvas(modifier = Modifier.size(24.dp)) {
+                            rotate(angle) {
+                                drawArc(
+                                    color = Color.White,
+                                    startAngle = 0f,
+                                    sweepAngle = 270f,
+                                    useCenter = false,
+                                    style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Request sent to $parentName",
+                                style = typography.headline.copy(
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                ),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "Waiting for approval · focus continues",
+                                style = typography.caption.copy(color = ChildColors.Secondary),
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
-                    Spacer(Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Request sent to $parentName",
-                            style = typography.headline.copy(
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            ),
-                            maxLines = 1,
-                            softWrap = false
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+            EndFocusSheetState.FAILED -> {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    radius = 16.dp,
+                    padding = 16.dp
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = FocalIcons.InfoCircle,
+                            contentDescription = null,
+                            tint = Color(0xFFA3A3A3),
+                            modifier = Modifier.size(24.dp)
                         )
-                        Spacer(Modifier.height(2.dp))
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Couldn't reach $parentName",
+                                style = typography.headline.copy(
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                ),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "Tap your card, or ask them to show the family QR",
+                                style = typography.caption.copy(color = ChildColors.Secondary),
+                                maxLines = 2
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+            EndFocusSheetState.DENIED -> {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    radius = 16.dp,
+                    padding = 16.dp
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = FocalIcons.Close,
+                            contentDescription = null,
+                            tint = Color(0xFFA3A3A3),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "$parentName said keep going",
+                                style = typography.headline.copy(
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                ),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "Focus continues",
+                                style = typography.caption.copy(color = ChildColors.Secondary),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+            else -> {}
+        }
+
+        // Action Buttons
+        when (sheetState) {
+            EndFocusSheetState.IDLE, EndFocusSheetState.SENDING -> {
+                val isBtnEnabled = selectedReason != null && sheetState == EndFocusSheetState.IDLE
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 52.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF0E0E0E))
+                        .border(1.dp, Color(0xFF262626), CircleShape)
+                        .alpha(if (selectedReason != null) 1f else 0.4f)
+                        .clickable(enabled = isBtnEnabled) {
+                            val reason = selectedReason ?: return@clickable
+                            sheetState = EndFocusSheetState.SENDING
+                            try {
+                                val fullReason = if (reason == "Other" && otherNote.isNotBlank()) "Other: $otherNote" else reason
+                                onRequestEmergencyExit(fullReason, otherNote)
+                                sheetState = EndFocusSheetState.SENT
+                            } catch (e: Throwable) {
+                                sheetState = EndFocusSheetState.FAILED
+                            }
+                        }
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (sheetState == EndFocusSheetState.SENDING) {
+                        val infiniteTransition = rememberInfiniteTransition(label = "sendingSpinner")
+                        val angle by infiniteTransition.animateFloat(
+                            initialValue = 0f,
+                            targetValue = 360f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(1000, easing = LinearEasing),
+                                repeatMode = RepeatMode.Restart
+                            ),
+                            label = "sendingSpinnerAngle"
+                        )
+                        Canvas(modifier = Modifier.size(20.dp)) {
+                            rotate(angle) {
+                                drawArc(
+                                    color = Color.White,
+                                    startAngle = 0f,
+                                    sweepAngle = 270f,
+                                    useCenter = false,
+                                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                                )
+                            }
+                        }
+                    } else {
                         Text(
-                            text = "Waiting for approval · focus continues",
-                            style = typography.caption.copy(color = ChildColors.Secondary),
-                            maxLines = 1,
-                            softWrap = false
+                            text = "Request emergency exit",
+                            style = typography.body.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 15.sp
+                            )
                         )
                     }
                 }
             }
-            Spacer(Modifier.height(16.dp))
+            EndFocusSheetState.SENT -> {
+                SecondaryButton(
+                    text = "Cancel request",
+                    onClick = {
+                        onCancelEmergencyExit()
+                        sheetState = EndFocusSheetState.IDLE
+                        selectedReason = null
+                        otherNote = ""
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            EndFocusSheetState.FAILED -> {
+                SecondaryButton(
+                    text = "Try again",
+                    onClick = {
+                        val reason = selectedReason ?: return@SecondaryButton
+                        sheetState = EndFocusSheetState.SENDING
+                        try {
+                            val fullReason = if (reason == "Other" && otherNote.isNotBlank()) "Other: $otherNote" else reason
+                            onRequestEmergencyExit(fullReason, otherNote)
+                            sheetState = EndFocusSheetState.SENT
+                        } catch (e: Throwable) {
+                            sheetState = EndFocusSheetState.FAILED
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            EndFocusSheetState.APPROVED, EndFocusSheetState.DENIED -> {}
         }
-
-        // SecondaryButton "Request emergency exit"
-        SecondaryButton(
-            text = "Request emergency exit",
-            onClick = {
-                val reason = selectedReason ?: return@SecondaryButton
-                onRequestEmergencyExit(reason)
-            },
-            enabled = selectedReason != null && !isRequestPending,
-            modifier = Modifier.fillMaxWidth()
-        )
 
         Spacer(Modifier.height(14.dp))
 

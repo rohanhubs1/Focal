@@ -1,12 +1,15 @@
 package com.example.myapplication.service
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import android.view.inputmethod.InputMethodManager
 import com.focal.app.data.FocalRepository
 import com.focal.app.engine.FocusEngine
 import com.focal.app.protection.*
@@ -24,6 +27,7 @@ class FocalAccessibilityService : AccessibilityService() {
     }
 
     private var focalAppLabel: String = "focal"
+    private var defaultLauncherPackage: String? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -63,14 +67,80 @@ class FocalAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         try {
-            val nowElapsed = SystemClock.elapsedRealtime()
+            val eventType = event.eventType
+            val isWindowState = (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)
+            val isContentChanged = (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)
+
+            // Problem 1a: Only TYPE_WINDOW_STATE_CHANGED decides blocking.
+            // Ignore CONTENT_CHANGED for launching (it may only be used for website/URL checks).
+            if (!isWindowState && !isContentChanged) {
+                return
+            }
+
+            val rawPackage = event.packageName?.toString() ?: ""
+            val lowerPkg = rawPackage.lowercase()
             val ownPackage = applicationContext.packageName
+            val state = ProtectionStateRepository.instance.state.value
+
+            if (isContentChanged) {
+                // Ignore CONTENT_CHANGED unless this is a known browser, focus is active, and blockedWebsites is non-empty
+                val isBrowser = ProtectionEngine.KNOWN_BROWSERS.contains(lowerPkg)
+                if (!isBrowser || !state.focusActive || state.policy.blockedWebsites.isEmpty()) {
+                    return
+                }
+            }
+
+            // Problem 1c: Ignore events from our own package, the launcher, SystemUI and the keyboard
+            if (isOwnAppPackage(lowerPkg, ownPackage)) {
+                // If user returned to FOCAL app -> End Fix-button Allowance immediately
+                if (com.focal.app.ui.components.PlatformPermissionsHelper.isSetupPageGraceActive()) {
+                    com.focal.app.ui.components.PlatformPermissionsHelper.setupPageAllowedUntilMs = 0L
+                    Log.d(TAG, "FIX_ALLOWANCE_END: User returned to FOCAL app, grace ended")
+                    try {
+                        ProtectionStateRepository.instance.recordDecision(
+                            DecisionLogEntry(
+                                timestampMs = System.currentTimeMillis(),
+                                packageName = ownPackage,
+                                windowClass = "FocalApp",
+                                decisionType = DecisionType.ALLOW,
+                                ruleLetter = 'a',
+                                reason = "FIX_ALLOWANCE_END",
+                                actionTaken = "Fix-button allowance ended upon returning to FOCAL"
+                            )
+                        )
+                    } catch (_: Exception) {}
+                }
+                return
+            }
+
+            if (lowerPkg == "com.android.systemui") {
+                return
+            }
+
+            if (isLauncherPackage(lowerPkg)) {
+                return
+            }
+
+            if (isKeyboardPackage(lowerPkg)) {
+                return
+            }
+
+            // Problem 1b: Debounce: if the block screen is already showing, or the same package was blocked < 1500 ms ago, do nothing.
+            val nowElapsed = SystemClock.elapsedRealtime()
+            val isBlockScreenShowing = BlockActivity.isShowing || BlockOverlayManager.isOverlayShowing()
+
+            if (isBlockScreenShowing) {
+                if (lowerPkg == ActionExecutor.lastBlockedPackage || (nowElapsed - ActionExecutor.lastBlockedTimestampMs) < 1500L) {
+                    return
+                }
+            } else if (lowerPkg == ActionExecutor.lastBlockedPackage && (nowElapsed - ActionExecutor.lastBlockedTimestampMs) < 1500L) {
+                return
+            }
 
             // 1. Detect Top Active Application Window & Package
             val windowInfo = extractWindowInfo(event, ownPackage) ?: return
 
             // 2. Query Protection Engine for Decision (Pure Kotlin Engine)
-            val state = ProtectionStateRepository.instance.state.value
             val isFixActive = com.focal.app.ui.components.PlatformPermissionsHelper.isSetupPageGraceActive()
             val decision = ProtectionEngine.decide(
                 windowInfo = windowInfo,
@@ -81,9 +151,14 @@ class FocalAccessibilityService : AccessibilityService() {
                 isFixAllowanceActive = isFixActive
             )
 
+            // For CONTENT_CHANGED events, only execute blocking if the decision is specifically BlockWebsite
+            if (isContentChanged && decision !is ProtectionDecision.BlockWebsite) {
+                return
+            }
+
             Log.d(TAG, "onAccessibilityEvent: pkg=${windowInfo.packageName}, focusActive=${state.focusActive}, decision=${decision.label}")
 
-            // 3. Delegate Action Execution (Smooth Overlay + HOME)
+            // 3. Delegate Action Execution (Launch BlockActivity directly ONCE)
             ActionExecutor.execute(
                 context = applicationContext,
                 accessibilityService = this,
@@ -94,6 +169,44 @@ class FocalAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             Log.e(TAG, "Error processing accessibility event: ${e.message}", e)
         }
+    }
+
+    private fun isLauncherPackage(pkg: String): Boolean {
+        if (ProtectionEngine.LAUNCHER_PACKAGES.contains(pkg)) return true
+        if (pkg == defaultLauncherPackage) return true
+        try {
+            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val resolveInfo = packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            val launcher = resolveInfo?.activityInfo?.packageName?.lowercase()
+            if (!launcher.isNullOrBlank()) {
+                defaultLauncherPackage = launcher
+                if (pkg == launcher) return true
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
+    private fun isKeyboardPackage(pkg: String): Boolean {
+        if (pkg.contains("inputmethod") || pkg.contains("keyboard") || pkg.contains("ime")) return true
+        try {
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            val imes = imm?.inputMethodList
+            if (imes != null) {
+                for (ime in imes) {
+                    if (ime.packageName.equals(pkg, ignoreCase = true)) return true
+                }
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
+    private fun isOwnAppPackage(pkg: String, ownPackage: String): Boolean {
+        val own = ownPackage.lowercase()
+        return pkg == own ||
+                pkg.contains("com.focal.app") ||
+                pkg.contains("com.example.myapplication") ||
+                pkg.contains("myapplication") ||
+                pkg.contains("com.rohan.focalapplication")
     }
 
     private fun extractWindowInfo(event: AccessibilityEvent, ownPackage: String): WindowInfo? {
@@ -124,33 +237,11 @@ class FocalAccessibilityService : AccessibilityService() {
         if (topPackage.isNullOrBlank()) return null
 
         val lowerPkg = topPackage.lowercase()
-        val ownPkgLower = ownPackage.lowercase()
 
-        // If user returned to FOCAL app -> End Fix-button Allowance immediately
-        if (lowerPkg == ownPkgLower || lowerPkg.contains("com.focal.app") ||
-            lowerPkg.contains("com.rohan.focalapplication") || lowerPkg.contains("myapplication")) {
-            if (com.focal.app.ui.components.PlatformPermissionsHelper.isSetupPageGraceActive()) {
-                com.focal.app.ui.components.PlatformPermissionsHelper.setupPageAllowedUntilMs = 0L
-                Log.d(TAG, "FIX_ALLOWANCE_END: User returned to FOCAL app, grace ended")
-                try {
-                    ProtectionStateRepository.instance.recordDecision(
-                        DecisionLogEntry(
-                            timestampMs = System.currentTimeMillis(),
-                            packageName = ownPackage,
-                            windowClass = "FocalApp",
-                            decisionType = DecisionType.ALLOW,
-                            ruleLetter = 'a',
-                            reason = "FIX_ALLOWANCE_END",
-                            actionTaken = "Fix-button allowance ended upon returning to FOCAL"
-                        )
-                    )
-                } catch (_: Exception) {}
-            }
-            return null
-        }
-
-        // Ignore events from FOCAL's own overlay or launcher while overlay is already showing
-        if (topClass.contains("BlockOverlay") || (BlockOverlayManager.isOverlayShowing() && ProtectionEngine.LAUNCHER_PACKAGES.contains(lowerPkg))) {
+        // Ignore events from FOCAL's own overlay or BlockActivity
+        if (topClass.contains("BlockOverlay") || topClass.contains("BlockActivity") ||
+            (BlockActivity.isShowing && isLauncherPackage(lowerPkg)) ||
+            (BlockOverlayManager.isOverlayShowing() && isLauncherPackage(lowerPkg))) {
             return null
         }
 

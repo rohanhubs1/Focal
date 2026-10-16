@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,6 +27,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.focal.app.data.FocalRepository
 import com.focal.app.engine.FocusEngine
 import com.focal.app.model.EmergencyExitRequest
+import com.focal.app.streak.getDeviceCurrentTimeMillis
 import com.focal.app.theme.FocalColors
 import com.focal.app.ui.child.ParentUnlockScreen
 import com.focal.app.ui.child.components.GlassCard
@@ -241,8 +243,19 @@ fun BlockedAppOverlay(
 
     val currentSession = focusEngine.currentSession
     val policyTitle = currentSession?.policyName ?: "Study Mode"
-    val remainingMinutes = (focusEngine.remainingSeconds / 60).coerceAtLeast(1)
     val isFocusActive = focusEngine.isFocusActive
+    val endTimeMillis = currentSession?.endTimeMillis ?: 0L
+    val nowClock by produceState(getDeviceCurrentTimeMillis(), endTimeMillis) {
+        while (true) {
+            value = getDeviceCurrentTimeMillis()
+            delay(1000 - value % 1000)
+        }
+    }
+    val remainingMinutes = if (endTimeMillis > 0L) {
+        ((endTimeMillis - nowClock + 59999L) / 60000L).coerceAtLeast(1L).toInt()
+    } else {
+        (focusEngine.remainingSeconds / 60).coerceAtLeast(1)
+    }
     val subtitleText = if (isFocusActive) "$policyTitle · $remainingMinutes min left" else "Protected by FOCAL · ask a parent"
 
     Dialog(
@@ -304,8 +317,19 @@ fun BlockedWebsiteOverlay(
 
     val currentSession = focusEngine.currentSession
     val policyTitle = currentSession?.policyName ?: "Study Mode"
-    val remainingMinutes = (focusEngine.remainingSeconds / 60).coerceAtLeast(1)
     val isFocusActive = focusEngine.isFocusActive
+    val endTimeMillis = currentSession?.endTimeMillis ?: 0L
+    val nowClock by produceState(getDeviceCurrentTimeMillis(), endTimeMillis) {
+        while (true) {
+            value = getDeviceCurrentTimeMillis()
+            delay(1000 - value % 1000)
+        }
+    }
+    val remainingMinutes = if (endTimeMillis > 0L) {
+        ((endTimeMillis - nowClock + 59999L) / 60000L).coerceAtLeast(1L).toInt()
+    } else {
+        (focusEngine.remainingSeconds / 60).coerceAtLeast(1)
+    }
     val subtitleText = if (isFocusActive) "$policyTitle · $remainingMinutes min left" else "Protected by FOCAL · ask a parent"
 
     Dialog(

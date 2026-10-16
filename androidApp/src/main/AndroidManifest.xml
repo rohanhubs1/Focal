@@ -52,12 +52,14 @@
             </intent-filter>
         </activity>
 
-        <!-- Fallback Block Activity -->
+        <!-- FOCAL Smooth Block Screen Activity -->
         <activity
             android:name=".service.BlockActivity"
             android:exported="false"
-            android:launchMode="singleInstance"
-            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:taskAffinity="com.focal.app.block"
+            android:theme="@style/Theme.Focal.BlockScreen" />
 
         <!-- Native Accessibility Service for Real App & Website Blocking -->
         <service

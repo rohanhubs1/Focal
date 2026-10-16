@@ -12,6 +12,7 @@ interface AuthRepository {
     suspend fun sendPasswordReset(email: String): Result<Unit>
     suspend fun signOut()
     fun getCurrentUser(): User?
+    fun isUserAdmin(): Boolean = true
 
     companion object {
         val instance: AuthRepository by lazy { LocalAuthRepository() }

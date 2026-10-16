@@ -57,15 +57,15 @@ fun ParentHomeScreen(
     val typography = LocalChildTypography.current
     val user = repository.currentUser
     val pendingEmergencyRequests = repository.emergencyRequests.filter { it.status == "PENDING" }
+    val newestPendingRequest = pendingEmergencyRequests.maxByOrNull { it.requestedAtMillis }
     val hasUnreadEvents by activityRepository.hasUnread.collectAsState()
     val activeParentSession: com.focal.app.pairing.ParentPairingSession? by com.focal.app.pairing.PairingRepository.instance.activeParentSessionFlow.collectAsState()
     var showAllowPhoneSheet by remember { mutableStateOf(false) }
     var showStartFocusSheet by remember { mutableStateOf(false) }
-    var tickerNow: Long by remember { mutableStateOf(currentTimeMillis()) }
-    LaunchedEffect(Unit) {
+    val tickerNow by produceState(com.focal.app.streak.getDeviceCurrentTimeMillis()) {
         while (true) {
-            delay(1000)
-            tickerNow = currentTimeMillis()
+            value = com.focal.app.streak.getDeviceCurrentTimeMillis()
+            delay(1000 - value % 1000)
         }
     }
     val notificationPromptShown = remember {
@@ -73,7 +73,7 @@ fun ParentHomeScreen(
     }
     var showNotificationSheet by remember { mutableStateOf(!notificationPromptShown) }
     val isPairingWaiting = activeParentSession?.state == com.focal.app.pairing.ParentPairState.PENDING_APPROVAL
-    val showUnreadDot = hasUnreadEvents || pendingEmergencyRequests.isNotEmpty() || isPairingWaiting
+    val showUnreadDot = hasUnreadEvents || newestPendingRequest != null || isPairingWaiting
 
     Box(
         modifier = Modifier
@@ -174,19 +174,50 @@ fun ParentHomeScreen(
             }
 
             // REQUEST CARD (only when something is waiting; newest first)
-            if (pendingEmergencyRequests.isNotEmpty()) {
+            if (newestPendingRequest != null) {
                 Spacer(modifier = Modifier.height(20.dp))
-                val req = pendingEmergencyRequests.first()
-                val associatedChild = repository.childrenList.find { it.id == req.childId }
+                val req = newestPendingRequest
+                val associatedChild = repository.childrenList.find { it.id == req.childId || it.name.equals(req.childName, ignoreCase = true) }
                 val childInitials = remember(req.childName) {
                     val parts = req.childName.trim().split(" ").filter { it.isNotBlank() }
                     if (parts.size >= 2) "${parts.first().firstOrNull() ?: ""}${parts.last().firstOrNull() ?: ""}".uppercase()
                     else req.childName.take(2).uppercase().ifEmpty { "AR" }
                 }
-                val policyName = associatedChild?.defaultPolicyId?.let { id ->
-                    repository.policies.find { it.id == id }?.name
-                } ?: "Study Mode"
-                val remainingLeft = if ((associatedChild?.remainingMinutes ?: 0) > 0) "${associatedChild?.remainingMinutes} min left" else "42 min left"
+                val policyName = if (com.focal.app.engine.FocusEngine.instance.isFocusActive && com.focal.app.engine.FocusEngine.instance.currentSession != null) {
+                    com.focal.app.engine.FocusEngine.instance.currentSession?.policyName ?: "Study Mode"
+                } else {
+                    associatedChild?.defaultPolicyId?.let { id ->
+                        repository.policies.find { it.id == id }?.name
+                    } ?: "Study Mode"
+                }
+                val realRemainingMinutes = when {
+                    com.focal.app.engine.FocusEngine.instance.isFocusActive && com.focal.app.engine.FocusEngine.instance.remainingSeconds > 0 -> {
+                        ((com.focal.app.engine.FocusEngine.instance.remainingSeconds + 59) / 60).toInt()
+                    }
+                    associatedChild != null && associatedChild.focusEndsAtMillis > com.focal.app.streak.getDeviceCurrentTimeMillis() -> {
+                        (((associatedChild.focusEndsAtMillis - com.focal.app.streak.getDeviceCurrentTimeMillis()) + 59999L) / 60000L).toInt()
+                    }
+                    associatedChild != null && associatedChild.remainingMinutes > 0 -> {
+                        associatedChild.remainingMinutes
+                    }
+                    else -> 1
+                }
+                val remainingLeft = "${realRemainingMinutes} min left"
+
+                val timeLabel = remember(req.requestedAtMillis, req.requestedAt, tickerNow) {
+                    if (req.requestedAtMillis > 0L) {
+                        val diffMs = (tickerNow - req.requestedAtMillis).coerceAtLeast(0L)
+                        val diffMins = diffMs / 60000L
+                        when {
+                            diffMins < 1L -> "Just now"
+                            diffMins == 1L -> "1 min ago"
+                            diffMins < 60L -> "$diffMins min ago"
+                            else -> "${diffMins / 60L} hr ago"
+                        }
+                    } else {
+                        req.requestedAt.ifBlank { "Just now" }
+                    }
+                }
 
                 Box(
                     modifier = Modifier
@@ -204,7 +235,7 @@ fun ParentHomeScreen(
                         .padding(18.dp)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // Overline row: ● EMERGENCY EXIT REQUEST        2 min ago
+                        // Overline row: ● EMERGENCY EXIT REQUEST        timeLabel
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -230,7 +261,7 @@ fun ParentHomeScreen(
                             }
 
                             Text(
-                                text = req.requestedAt.ifBlank { "2 min ago" },
+                                text = timeLabel,
                                 style = typography.caption.copy(
                                     fontSize = 12.sp,
                                     color = Color(0xFFA3A3A3)

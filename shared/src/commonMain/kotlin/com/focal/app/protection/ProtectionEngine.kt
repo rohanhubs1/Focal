@@ -248,8 +248,14 @@ object ProtectionEngine {
         }
 
         // Lock Settings = ALWAYS (All the time mode)
-        if (SETTINGS_PACKAGES.contains(lowerPkg) && state.lockSettingsMode == LockSettingsMode.ALWAYS) {
-            return ProtectionDecision.LockSettings('f', "Settings package locked all the time")
+        val isSettingsPkg = SETTINGS_PACKAGES.contains(lowerPkg) ||
+                lowerPkg.startsWith("com.oplus.") ||
+                lowerPkg.startsWith("com.coloros.")
+        if (isSettingsPkg && state.lockSettingsMode == LockSettingsMode.ALWAYS) {
+            val blockedRule = SettingsBlockRules.findMatchingBlockedRule(windowInfo, ownPackage, appLabelLower)
+            if (blockedRule != null) {
+                return ProtectionDecision.LockSettings('f', blockedRule.description)
+            }
         }
 
         // Rule e: If !focusActive -> ALLOW
@@ -258,8 +264,14 @@ object ProtectionEngine {
         }
 
         // Rule f: During focus — SETTINGS
-        if (SETTINGS_PACKAGES.contains(lowerPkg)) {
-            return ProtectionDecision.LockSettings('f', "Settings package locked during focus")
+        if (isSettingsPkg) {
+            val blockedRule = SettingsBlockRules.findMatchingBlockedRule(windowInfo, ownPackage, appLabelLower)
+            if (blockedRule != null) {
+                return ProtectionDecision.LockSettings('f', blockedRule.description)
+            } else {
+                // Allow general Settings (Wi-Fi, Bluetooth, mobile data, sound, display, brightness, battery, etc.)
+                return ProtectionDecision.Allow('f', "Allowed general Settings page")
+            }
         }
         if (lowerPkg == "com.android.systemui" && fullTextLower.contains("active apps") && (fullTextLower.contains(appLabelLower) || fullTextLower.contains("focal"))) {
             return ProtectionDecision.LockSettings('f', "Active Apps stop dialog locked during focus")

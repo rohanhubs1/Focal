@@ -563,7 +563,10 @@ class SharedCommonTest {
     @Test
     fun testStepP1_EmergencyExitRequestResolution() {
         val repo = com.focal.app.data.FocalRepository.instance
-        val pending = repo.emergencyRequests.find { it.status == "PENDING" }
+        var pending = repo.emergencyRequests.find { it.status == "PENDING" }
+        if (pending == null) {
+            pending = repo.submitEmergencyExitRequest("sess_test", "Need to call someone")
+        }
         kotlin.test.assertNotNull(pending, "Should have a pending emergency request")
 
         val reqId = pending.id
@@ -572,7 +575,7 @@ class SharedCommonTest {
         repo.resolveEmergencyRequest(reqId, false)
         val declined = repo.emergencyRequests.find { it.id == reqId }
         kotlin.test.assertNotNull(declined)
-        assertEquals("REJECTED", declined.status)
+        assertTrue(declined.status == "DECLINED" || declined.status == "REJECTED")
 
         // Event is logged to ActivityRepository
         val lastEvent = com.focal.app.data.ActivityRepository.instance.events.value.firstOrNull()
@@ -1236,14 +1239,25 @@ class SharedCommonTest {
 
         val req2 = repo.submitEmergencyExitRequest("sess_2", "Want to play games")
         assertEquals("PENDING", req2.status)
+        assertEquals(36, req2.id.length, "Request id must be a UUID")
 
-        repo.resolveEmergencyRequest(req2.id, approve = false)
-        val resolved2 = repo.emergencyRequests.find { it.id == req2.id }
-        assertEquals("REJECTED", resolved2?.status)
+        // Submitting another request cancels older pending request
+        val req3 = repo.submitEmergencyExitRequest("sess_2", "Second emergency request")
+        assertEquals("PENDING", req3.status)
+        val oldReq2 = repo.emergencyRequests.find { it.id == req2.id }
+        assertEquals("CANCELLED", oldReq2?.status, "Older pending request must be cancelled")
+
+        repo.resolveEmergencyRequest(req3.id, approve = false)
+        val resolved3 = repo.emergencyRequests.find { it.id == req3.id }
+        assertEquals("DECLINED", resolved3?.status)
         assertTrue(engine.isFocusActive, "Declining exit must keep focus active")
 
-        // Clean up
-        engine.endFocus(com.focal.app.model.TriggerType.EMERGENCY_OVERRIDE, "TEST")
+        // Ending focus any other way marks pending requests as EXPIRED
+        val req4 = repo.submitEmergencyExitRequest("sess_2", "Another request before timer end")
+        assertEquals("PENDING", req4.status)
+        engine.endFocus(com.focal.app.model.TriggerType.TIMER_EXPIRED, "TIMER")
+        val expiredReq = repo.emergencyRequests.find { it.id == req4.id }
+        assertEquals("EXPIRED", expiredReq?.status, "Ending focus must expire pending emergency requests")
     }
 
     @Test

@@ -128,4 +128,10 @@ class LocalAuthRepository(
     override fun getCurrentUser(): User? {
         return focalRepository.currentUser
     }
+
+    override fun isUserAdmin(): Boolean {
+        if (com.focal.app.config.FocalConfig.isDemoMode) return true
+        val user = getCurrentUser() ?: return false
+        return user.role == UserRole.ADMIN
+    }
 }

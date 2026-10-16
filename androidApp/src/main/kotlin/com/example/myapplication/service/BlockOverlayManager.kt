@@ -2,6 +2,7 @@ package com.example.myapplication.service
 
 import android.animation.ObjectAnimator
 import android.content.Context
+import android.content.Intent
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Drawable
@@ -351,6 +352,13 @@ object BlockOverlayManager {
                     setMargins((8 * density).toInt(), 0, (8 * density).toInt(), (12 * density).toInt())
                 }
                 setOnClickListener {
+                    try {
+                        val appIntent = Intent(context, com.example.myapplication.MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            putExtra("open", "child_home")
+                        }
+                        context.startActivity(appIntent)
+                    } catch (_: Exception) {}
                     dismissOverlay(context)
                     onParentUnlockClick()
                 }
@@ -378,6 +386,13 @@ object BlockOverlayManager {
                 setMargins((8 * density).toInt(), 0, (8 * density).toInt(), 0)
             }
             setOnClickListener {
+                try {
+                    val appIntent = Intent(context, com.example.myapplication.MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        putExtra("open", "child_home")
+                    }
+                    context.startActivity(appIntent)
+                } catch (_: Exception) {}
                 dismissOverlay(context)
                 onBackToFocusClick()
             }

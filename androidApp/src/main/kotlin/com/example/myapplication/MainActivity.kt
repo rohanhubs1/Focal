@@ -85,6 +85,7 @@ class MainActivity : ComponentActivity() {
         intent?.let {
             handleNfcIntent(it)
             handleBlockedAppIntent(it)
+            handleOpenIntent(it)
         }
 
         // Allow screenshots and screen capture cleanly during all focus sessions and app usage
@@ -127,6 +128,14 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         handleNfcIntent(intent)
         handleBlockedAppIntent(intent)
+        handleOpenIntent(intent)
+    }
+
+    private fun handleOpenIntent(intent: Intent?) {
+        val open = intent?.getStringExtra("open")
+        if (open == "child_home") {
+            FocalRepository.instance.navigateToChildHome()
+        }
     }
 
     private fun handleBlockedAppIntent(intent: Intent) {

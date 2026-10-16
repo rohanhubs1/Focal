@@ -505,6 +505,22 @@ actual object PlatformPermissionsHelper {
             showToast("Printing error")
         }
     }
+
+    actual fun testBlockScreen() {
+        try {
+            appContext?.let { ctx ->
+                val intent = Intent().apply {
+                    component = ComponentName(ctx.packageName, "com.example.myapplication.service.BlockActivity")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    putExtra("EXTRA_TITLE", "Test block screen")
+                    putExtra("EXTRA_SUBTITLE", "Testing block UI for 3 seconds")
+                    putExtra("EXTRA_TARGET_NAME", "Test App")
+                    putExtra("EXTRA_PACKAGE_NAME", "com.focal.test")
+                }
+                ctx.startActivity(intent)
+            }
+        } catch (_: Exception) {}
+    }
 }
 
 @Composable
