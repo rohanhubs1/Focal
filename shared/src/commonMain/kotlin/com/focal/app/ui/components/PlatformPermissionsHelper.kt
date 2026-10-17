@@ -43,8 +43,13 @@ expect object PlatformPermissionsHelper {
     fun shareQrCode(title: String, payload: String)
     fun printQrCode(title: String, payload: String)
     fun testBlockScreen()
+    fun isCameraPermissionGranted(): Boolean
+    fun vibrate(durationMs: Long = 50L)
 }
 
 @androidx.compose.runtime.Composable
 expect fun rememberDeviceAdminLauncher(onResult: (Boolean) -> Unit): () -> Unit
+
+@androidx.compose.runtime.Composable
+expect fun rememberCameraPermissionLauncher(onResult: (Boolean) -> Unit): () -> Unit
 

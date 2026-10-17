@@ -261,8 +261,8 @@ fun ParentActivityScreen(
                                         else child.name.take(2).uppercase().ifEmpty { "CH" }
                                     } else {
                                         when (event.childId) {
-                                            "child_1" -> "AR"
-                                            "child_2" -> "KI"
+                                            "child_1" -> if (com.focal.app.config.FocalConfig.isDemoMode) "AR" else "CH"
+                                            "child_2" -> if (com.focal.app.config.FocalConfig.isDemoMode) "KI" else "CH"
                                             else -> "CH"
                                         }
                                     }

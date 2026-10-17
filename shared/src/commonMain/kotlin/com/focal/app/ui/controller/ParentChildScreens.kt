@@ -287,7 +287,7 @@ fun ChildDetailScreen(
 
                     // STATUS CARD (GlassCard, radius 24dp)
                     val isProtectionOff = repository.isChildProtectionOff(currentChild.id)
-                    val isPhoneNotConnected = currentChild.deviceName.isBlank()
+                    val isPhoneNotConnected = currentChild.childUid.isNullOrBlank()
 
                     GlassCard(
                         modifier = Modifier.fillMaxWidth(),
@@ -382,9 +382,9 @@ fun ChildDetailScreen(
                                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                                 )
                             } else if (isPhoneNotConnected) {
-                                // Phone not connected yet state
+                                // Phone not connected state
                                 Text(
-                                    text = "Phone not connected yet",
+                                    text = "Phone not connected",
                                     style = typography.headline.copy(
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.SemiBold,
@@ -406,7 +406,7 @@ fun ChildDetailScreen(
                                 Spacer(Modifier.height(16.dp))
 
                                 SecondaryButton(
-                                    text = "Connect phone",
+                                    text = "Reconnect phone",
                                     onClick = onConnectPhone,
                                     modifier = Modifier.fillMaxWidth().height(48.dp)
                                 )
@@ -700,7 +700,7 @@ fun ChildDetailScreen(
                             text = "End focus",
                             onClick = {
                                 showEndFocusConfirmDialog = false
-                                FocusEngine.instance.remoteStopFocus(currentChild.id)
+                                repository.stopRemoteSession(currentChild.id)
                                 ActivityRepository.instance.recordEvent(
                                     type = ActivityEventType.FOCUS_ENDED,
                                     childId = currentChild.id,
@@ -738,6 +738,10 @@ fun ChildDetailScreen(
             onUnlinkPhone = {
                 showOverflowMenu = false
                 showUnlinkConfirmDialog = true
+            },
+            onReconnectPhone = {
+                showOverflowMenu = false
+                onConnectPhone()
             },
             onRemoveChild = {
                 showOverflowMenu = false
@@ -834,7 +838,7 @@ fun ChildDetailScreen(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "Remove ${currentChild.name}?",
+                        text = "Delete ${currentChild.name}?",
                         style = typography.headline.copy(
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
@@ -843,7 +847,7 @@ fun ChildDetailScreen(
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "${currentChild.name}'s phone will stop being protected and their profile will be removed.",
+                        text = "${currentChild.name}'s profile will be deleted. Past focus history will be kept.",
                         style = typography.body.copy(
                             fontSize = 14.sp,
                             color = ChildColors.Secondary
@@ -864,13 +868,13 @@ fun ChildDetailScreen(
                                 .clickable {
                                     showRemoveConfirmDialog = false
                                     repository.removeChild(currentChild.id)
-                                    PlatformPermissionsHelper.showToast("Removed ${currentChild.name}")
+                                    PlatformPermissionsHelper.showToast("Deleted ${currentChild.name}")
                                     onBack()
                                 },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "Remove child",
+                                text = "Delete child",
                                 style = typography.headline.copy(
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
@@ -1430,7 +1434,7 @@ fun StartFocusSheet(
                     if (isEnabled) {
                         val namesList = mutableListOf<String>()
                         selectedChildrenIds.forEach { childId ->
-                            FocusEngine.instance.remoteStartFocus(childId, selectedPolicy, activeDuration)
+                            repository.startRemoteSession(childId, selectedPolicy.id, selectedPolicy.name, activeDuration)
                             val c = repository.childrenList.find { it.id == childId }
                             val cName = c?.name ?: "Child"
                             namesList.add(cName)
@@ -2883,10 +2887,12 @@ fun ChildOverflowMenuSheet(
     onDismiss: () -> Unit,
     onEditNameClass: () -> Unit,
     onUnlinkPhone: () -> Unit,
-    onRemoveChild: () -> Unit
+    onRemoveChild: () -> Unit,
+    onReconnectPhone: () -> Unit = {}
 ) {
     val typography = LocalChildTypography.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val isPhoneLinked = !child.childUid.isNullOrBlank()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -2953,58 +2959,87 @@ fun ChildOverflowMenuSheet(
                         )
                     }
 
-                    ChildDivider()
+                    if (isPhoneLinked) {
+                        ChildDivider()
 
-                    // Option 2: Unlink phone (red)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onUnlinkPhone() }
-                            .padding(horizontal = 18.dp, vertical = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = FocalIcons.Smartphone,
-                            contentDescription = null,
-                            tint = Color(0xFFFF453A),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(14.dp))
-                        Text(
-                            text = "Unlink phone",
-                            style = typography.headline.copy(
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFFFF453A)
+                        // Option 2: Unlink phone (red)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onUnlinkPhone() }
+                                .padding(horizontal = 18.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = FocalIcons.Smartphone,
+                                contentDescription = null,
+                                tint = Color(0xFFFF453A),
+                                modifier = Modifier.size(20.dp)
                             )
-                        )
-                    }
-
-                    ChildDivider()
-
-                    // Option 3: Remove child (red)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onRemoveChild() }
-                            .padding(horizontal = 18.dp, vertical = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = FocalIcons.Trash,
-                            contentDescription = null,
-                            tint = Color(0xFFFF453A),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(14.dp))
-                        Text(
-                            text = "Remove child",
-                            style = typography.headline.copy(
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFFFF453A)
+                            Spacer(Modifier.width(14.dp))
+                            Text(
+                                text = "Unlink phone",
+                                style = typography.headline.copy(
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFFFF453A)
+                                )
                             )
-                        )
+                        }
+                    } else {
+                        ChildDivider()
+
+                        // Option 2: Reconnect phone
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onReconnectPhone() }
+                                .padding(horizontal = 18.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = FocalIcons.Smartphone,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(14.dp))
+                            Text(
+                                text = "Reconnect phone",
+                                style = typography.headline.copy(
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                            )
+                        }
+
+                        ChildDivider()
+
+                        // Option 3: Delete child (only when no phone linked)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onRemoveChild() }
+                                .padding(horizontal = 18.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = FocalIcons.Trash,
+                                contentDescription = null,
+                                tint = Color(0xFFFF453A),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(14.dp))
+                            Text(
+                                text = "Delete child",
+                                style = typography.headline.copy(
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFFFF453A)
+                                )
+                            )
+                        }
                     }
                 }
             }

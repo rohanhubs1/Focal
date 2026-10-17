@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "658391164268",
-    "project_id": "focal-wellbeing",
-    "storage_bucket": "focal-wellbeing.firebasestorage.app"
+    "project_number": "956577382604",
+    "project_id": "focal-7c90a",
+    "storage_bucket": "focal-7c90a.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:658391164268:android:c11459e0f79da26ebdff49",
+        "mobilesdk_app_id": "1:956577382604:android:1d10a128fc297a33420269",
         "android_client_info": {
           "package_name": "com.rohan.focalapplication"
         }
@@ -15,26 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCtV7y3LePshYl3TMK0Dhv-sZd6h1mQO_I"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:658391164268:android:c11459e0f79da26ebdff50",
-        "android_client_info": {
-          "package_name": "com.rohan.focalapplication.demo"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyCtV7y3LePshYl3TMK0Dhv-sZd6h1mQO_I"
+          "current_key": "AIzaSyCA305nYPcI7N6KTA01HIuyeUTGa4T0Xy0"
         }
       ],
       "services": {

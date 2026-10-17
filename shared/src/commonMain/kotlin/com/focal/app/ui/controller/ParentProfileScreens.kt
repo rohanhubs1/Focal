@@ -275,13 +275,13 @@ fun ParentProfileTabScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     ChildAvatar(
-                        name = user.name.ifBlank { "Priya Sharma" },
+                        name = user.name.ifBlank { "Parent" },
                         size = 60.dp
                     )
                     Spacer(modifier = Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = user.name.ifBlank { "Priya Sharma" },
+                            text = user.name.ifBlank { "Parent" },
                             style = typography.title.copy(
                                 fontSize = 19.sp,
                                 fontWeight = FontWeight.Bold,
@@ -291,7 +291,7 @@ fun ParentProfileTabScreen(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = user.email.ifBlank { "priya@gmail.com" },
+                            text = user.email.ifBlank { "" },
                             style = typography.caption.copy(
                                 fontSize = 13.sp,
                                 color = ChildColors.Secondary
@@ -1768,21 +1768,26 @@ fun ParentChildrenListScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                val isNotConnected = child.childUid.isNullOrBlank()
                                 Box(
                                     modifier = Modifier
                                         .size(6.dp)
                                         .clip(CircleShape)
-                                        .background(if (child.isFocusing) Color.White else Color(0xFF6B6B6B))
+                                        .background(if (!isNotConnected) Color.White else Color(0xFF6B6B6B))
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                val statusText = if (child.isFocusing) {
-                                    "Focusing · ${child.remainingMinutes}m left"
-                                } else {
-                                    "Not focusing · ${child.todayFocusMinutes / 60}h ${child.todayFocusMinutes % 60}m today"
+                                val statusText = when {
+                                    isNotConnected -> "Phone not connected"
+                                    child.isFocusing -> "Focusing · ${child.remainingMinutes}m left"
+                                    child.todayFocusMinutes > 0 -> "Connected · ${child.todayFocusMinutes / 60}h ${child.todayFocusMinutes % 60}m today"
+                                    else -> "Connected"
                                 }
                                 Text(
                                     text = statusText,
-                                    style = typography.caption.copy(fontSize = 12.sp, color = ChildColors.Secondary),
+                                    style = typography.caption.copy(
+                                        fontSize = 12.sp,
+                                        color = if (isNotConnected) Color(0xFF6B6B6B) else ChildColors.Secondary
+                                    ),
                                     maxLines = 2
                                 )
                             }
@@ -2098,8 +2103,8 @@ fun InviteParentScreen(
 ) {
     val typography = LocalChildTypography.current
     val clipboardManager = LocalClipboardManager.current
-    val inviteCode = "focal.app/invite/family_priya_84920"
-    var coParents by remember { mutableStateOf(listOf("Rohan Sharma · Co-parent")) }
+    val inviteCode = "focal.app/invite/${repository.currentUser.id.ifBlank { "family" }}"
+    var coParents by remember { mutableStateOf(emptyList<String>()) }
     var coParentToRemove by remember { mutableStateOf<String?>(null) }
 
     DetailScaffold(
@@ -2377,7 +2382,7 @@ fun AccountSecurityScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = "Name", style = typography.caption.copy(fontSize = 12.sp, color = ChildColors.Secondary))
-                        Text(text = repository.controllerUser.name.ifBlank { "Priya Sharma" }, style = typography.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White))
+                        Text(text = repository.controllerUser.name.ifBlank { "Parent" }, style = typography.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White))
                     }
                     StatusPill(text = "Edit", type = StatusPillType.UPCOMING, modifier = Modifier.clickable { editingName = true })
                 }
@@ -2390,7 +2395,7 @@ fun AccountSecurityScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = "Email", style = typography.caption.copy(fontSize = 12.sp, color = ChildColors.Secondary))
-                        Text(text = repository.controllerUser.email.ifBlank { "priya@gmail.com" }, style = typography.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White))
+                        Text(text = repository.controllerUser.email.ifBlank { "" }, style = typography.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White))
                     }
                     StatusPill(text = "Edit", type = StatusPillType.UPCOMING, modifier = Modifier.clickable { editingEmail = true })
                 }

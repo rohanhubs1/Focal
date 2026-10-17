@@ -34,11 +34,13 @@ actual class ScreenTimeProvider actual constructor() {
 
         // Calculate focus multiplier based on range
         val rangeFocusMinutes = when (range) {
-            InsightsRange.WEEK -> (childTodayFocusMinutes * 4.8f).toInt().coerceAtLeast(120) // ~12h 30m
-            InsightsRange.MONTH -> (childTodayFocusMinutes * 18f).toInt().coerceAtLeast(600)
-            InsightsRange.LIFETIME -> (childTodayFocusMinutes * 120f).toInt().coerceAtLeast(3600)
+            InsightsRange.WEEK -> (childTodayFocusMinutes * 4.8f).toInt().coerceAtLeast(if (com.focal.app.config.FocalConfig.isDemoMode) 120 else 0) // ~12h 30m
+            InsightsRange.MONTH -> (childTodayFocusMinutes * 18f).toInt().coerceAtLeast(if (com.focal.app.config.FocalConfig.isDemoMode) 600 else 0)
+            InsightsRange.LIFETIME -> (childTodayFocusMinutes * 120f).toInt().coerceAtLeast(if (com.focal.app.config.FocalConfig.isDemoMode) 3600 else 0)
         }
-        val dailyAvgFocusMinutes = (rangeFocusMinutes / (if (range == InsightsRange.WEEK) 7 else if (range == InsightsRange.MONTH) 30 else 180)).coerceAtLeast(60)
+        val dailyAvgFocusMinutes = if (rangeFocusMinutes > 0) {
+            (rangeFocusMinutes / (if (range == InsightsRange.WEEK) 7 else if (range == InsightsRange.MONTH) 30 else 180)).coerceAtLeast(if (com.focal.app.config.FocalConfig.isDemoMode) 60 else 0)
+        } else 0
 
         if (!hasUsage || context == null) {
             // Usage access NOT granted: focus only, no screen time

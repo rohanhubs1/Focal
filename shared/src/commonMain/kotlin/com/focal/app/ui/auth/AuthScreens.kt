@@ -1767,8 +1767,12 @@ fun FocusMethodScreen(
     var showAddCardSheet by remember { mutableStateOf(false) }
 
     fun saveChoice(method: FocusMethodType) {
-        FocalLocalStorage.saveString("KEY_PREFERRED_FOCUS_METHOD", if (method == FocusMethodType.NFC) "NFC" else "QR")
+        val methodStr = if (method == FocusMethodType.NFC) "NFC" else "QR"
+        FocalLocalStorage.saveString("KEY_PREFERRED_FOCUS_METHOD", methodStr)
+        FocalLocalStorage.saveString("KEY_FOCUS_METHOD", methodStr)
         FocalLocalStorage.saveBoolean("KEY_FOCUS_METHOD_CHOSEN", true)
+        FocalLocalStorage.saveBoolean("KEY_ONBOARDING_DONE", true)
+        com.focal.app.data.AuthRepository.instance.saveFocusMethod(methodStr)
     }
 
     Box(

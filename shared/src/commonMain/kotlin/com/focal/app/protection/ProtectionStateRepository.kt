@@ -27,11 +27,30 @@ class ProtectionStateRepository private constructor() {
         val focusActive = FocalLocalStorage.getBoolean("KEY_FOCUS_ACTIVE", false)
         val endsAt = FocalLocalStorage.getLong("KEY_FOCUS_ENDS_AT_ELAPSED", 0L)
         
+        val cachedApps = FocalLocalStorage.getString("KEY_CACHED_BLOCKED_APPS", "")
+        val cachedWebs = FocalLocalStorage.getString("KEY_CACHED_BLOCKED_WEBSITES", "")
+        val initialPolicy = if (cachedApps.isNotBlank() || cachedWebs.isNotBlank()) {
+            val appList = if (cachedApps.isNotBlank()) cachedApps.split(",").map { it.trim() } else emptyList()
+            val webList = if (cachedWebs.isNotBlank()) cachedWebs.split(",").map { it.trim() } else emptyList()
+            _state.value.policy.copy(
+                blockedApps = appList,
+                blockedPackages = appList.toSet(),
+                blockedWebsites = webList
+            )
+        } else {
+            _state.value.policy
+        }
+
         _state.value = _state.value.copy(
             setupComplete = setupDone,
             focusActive = focusActive,
-            focusEndsAtElapsed = endsAt
+            focusEndsAtElapsed = endsAt,
+            policy = initialPolicy
         )
+    }
+
+    fun updatePolicy(policy: FocusPolicyData) {
+        _state.value = _state.value.copy(policy = policy)
     }
 
     fun updateSetupComplete(complete: Boolean) {
@@ -39,7 +58,11 @@ class ProtectionStateRepository private constructor() {
         _state.value = _state.value.copy(setupComplete = complete)
     }
 
-    fun updateFocusActive(active: Boolean, endsAtElapsed: Long, policy: FocusPolicyData) {
+    fun updateFocusActive(
+        active: Boolean,
+        endsAtElapsed: Long = 0L,
+        policy: FocusPolicyData = _state.value.policy
+    ) {
         FocalLocalStorage.saveBoolean("KEY_FOCUS_ACTIVE", active)
         FocalLocalStorage.saveLong("KEY_FOCUS_ENDS_AT_ELAPSED", endsAtElapsed)
         _state.value = _state.value.copy(

@@ -110,8 +110,11 @@ data class ChildProfile(
     val focusTotalMinutes: Int = 90,
     val pairedCardId: String? = "FC0001",
     val deviceName: String = "Rahul's Galaxy Tab S9",
-    val cardCustodyMode: String = "Card stays with child" // "Card stays with child" (default) or "I keep the card"
+    val cardCustodyMode: String = "Card stays with child", // "Card stays with child" (default) or "I keep the card"
+    val childUid: String? = null
 ) {
+    val isPhoneConnected: Boolean get() = !childUid.isNullOrBlank()
+
     val displayGrade: String
         get() = when {
             grade.isNotBlank() -> grade
@@ -128,7 +131,9 @@ data class InstalledApp(
     val category: String, // "Social", "Video", "Games", "Shopping", "Browsers", "Other"
     val iconHash: String = "",
     val isSystemApp: Boolean = false,
-    val childOwnerName: String = ""
+    val childOwnerName: String = "",
+    val iconPng: String = "",
+    val childId: String = ""
 )
 
 data class FocusPolicy(

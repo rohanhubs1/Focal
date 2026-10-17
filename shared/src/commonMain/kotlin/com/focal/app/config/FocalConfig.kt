@@ -6,7 +6,7 @@ object FocalConfig {
 
     // Controls whether DEV role switcher floating pill is displayed
     val showDevRoleSwitcher: Boolean
-        get() = isDemoMode || isDebug
+        get() = isDemoMode
 
     // Controls whether same-device pairing button is visible in Parent pairing screen
     val allowSameDevicePairing: Boolean

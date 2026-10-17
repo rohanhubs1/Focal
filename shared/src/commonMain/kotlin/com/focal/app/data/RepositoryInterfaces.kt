@@ -13,9 +13,17 @@ interface AuthRepository {
     suspend fun signOut()
     fun getCurrentUser(): User?
     fun isUserAdmin(): Boolean = true
+    fun saveFocusMethod(method: String) {}
 
     companion object {
-        val instance: AuthRepository by lazy { LocalAuthRepository() }
+        private var _instance: AuthRepository? = null
+
+        fun install(repository: AuthRepository) {
+            _instance = repository
+        }
+
+        val instance: AuthRepository
+            get() = _instance ?: LocalAuthRepository().also { _instance = it }
     }
 }
 

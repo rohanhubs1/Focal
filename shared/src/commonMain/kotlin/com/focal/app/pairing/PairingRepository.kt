@@ -36,7 +36,8 @@ data class ParentPairingSession(
     val deviceManufacturer: String = "Realme",
     val androidVersion: String = "14",
     val requestedAtMs: Long = 0L,
-    val isDeclined: Boolean = false
+    val isDeclined: Boolean = false,
+    val childUid: String? = null
 )
 
 data class PairRequest(
@@ -75,7 +76,15 @@ interface PairingRepository {
     val activeParentSessionFlow: StateFlow<ParentPairingSession?>
 
     companion object {
-        val instance: PairingRepository get() = DefaultPairingRepository.instance
+        private var _instance: PairingRepository? = null
+
+        fun install(repository: PairingRepository) {
+            _instance = repository
+        }
+
+        val instance: PairingRepository
+            get() = _instance ?: DefaultPairingRepository.instance.also { _instance = it }
+
         const val KEY_PAIRED_PARENT_NAME = "KEY_PAIRED_PARENT_NAME"
     }
 }

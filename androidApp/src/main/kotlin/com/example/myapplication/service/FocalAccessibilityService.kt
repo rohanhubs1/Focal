@@ -42,6 +42,7 @@ class FocalAccessibilityService : AccessibilityService() {
         Log.d(TAG, "onServiceConnected: FOCAL Accessibility Service active. App label = '$focalAppLabel'")
         FocalRepository.instance.reportProtectionRestored()
         FocusEngine.instance.checkAndUpdatePermissions()
+        FocalRepository.instance.startChildSessionListener(this)
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -62,6 +63,7 @@ class FocalAccessibilityService : AccessibilityService() {
         Log.d(TAG, "onDestroy: Accessibility Service destroyed")
         FocalRepository.instance.reportProtectionDisabled("Accessibility Service Stopped")
         FocusEngine.instance.checkAndUpdatePermissions()
+        FocalRepository.instance.stopChildSessionListener()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

@@ -73,6 +73,9 @@ class MainActivity : ComponentActivity() {
         com.focal.app.config.FocalConfig.isDemoMode = BuildConfig.IS_DEMO_MODE
         com.focal.app.config.FocalConfig.isDebug = BuildConfig.DEBUG
 
+        // Initialize repositories for the active build flavor
+        com.example.myapplication.init.AppInitializer.init(applicationContext)
+
         // Bind Context to Permissions Helper
         com.focal.app.ui.components.PlatformPermissionsHelper.appContext = applicationContext
         com.focal.app.ui.components.PlatformPermissionsHelper.currentActivity = java.lang.ref.WeakReference(this)

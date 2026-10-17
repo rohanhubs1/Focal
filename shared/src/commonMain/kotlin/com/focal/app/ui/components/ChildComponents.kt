@@ -279,6 +279,7 @@ fun StreakPill(
     streakCount: Int,
     modifier: Modifier = Modifier
 ) {
+    if (streakCount <= 0) return
     val typography = LocalChildTypography.current
     Row(
         modifier = modifier
@@ -298,7 +299,7 @@ fun StreakPill(
             modifier = Modifier.size(14.dp)
         )
         Text(
-            text = if (streakCount > 0) "$streakCount day streak" else "Start a streak",
+            text = "$streakCount day streak",
             style = typography.caption.copy(
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold

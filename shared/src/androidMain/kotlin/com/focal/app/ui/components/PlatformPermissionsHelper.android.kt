@@ -521,6 +521,37 @@ actual object PlatformPermissionsHelper {
             }
         } catch (_: Exception) {}
     }
+
+    actual fun isCameraPermissionGranted(): Boolean {
+        val ctx = appContext ?: return false
+        return androidx.core.content.ContextCompat.checkSelfPermission(
+            ctx,
+            android.Manifest.permission.CAMERA
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    actual fun vibrate(durationMs: Long) {
+        try {
+            val ctx = appContext ?: return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+                vibratorManager?.defaultVibrator?.vibrate(
+                    android.os.VibrationEffect.createOneShot(durationMs, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                val vibrator = ctx.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator?.vibrate(
+                        android.os.VibrationEffect.createOneShot(durationMs, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator?.vibrate(durationMs)
+                }
+            }
+        } catch (_: Exception) {}
+    }
 }
 
 @Composable
@@ -552,5 +583,15 @@ actual fun rememberDeviceAdminLauncher(onResult: (Boolean) -> Unit): () -> Unit 
             } catch (_: Exception) {}
         }
     }
+}
+
+@Composable
+actual fun rememberCameraPermissionLauncher(onResult: (Boolean) -> Unit): () -> Unit {
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        onResult(granted)
+    }
+    return { launcher.launch(android.Manifest.permission.CAMERA) }
 }
 

@@ -110,7 +110,8 @@ fun FocalRootApp(
             if (!authDone) {
                 return AppScreenState.PARENT_LOGIN
             }
-            val focusMethodChosen = FocalLocalStorage.getBoolean("KEY_FOCUS_METHOD_CHOSEN", false)
+            val focusMethodChosen = FocalLocalStorage.getBoolean("KEY_FOCUS_METHOD_CHOSEN", false) ||
+                    FocalLocalStorage.getBoolean("KEY_ONBOARDING_DONE", false)
             if (!focusMethodChosen) {
                 return AppScreenState.FOCUS_METHOD
             }
@@ -143,7 +144,7 @@ fun FocalRootApp(
 
     // Selected child for detail management in Parent role
     var selectedChildForManagement by remember { mutableStateOf<ChildProfile?>(null) }
-    var createdChildNameForPairing by remember { mutableStateOf("Rahul") }
+    var createdChildNameForPairing by remember { mutableStateOf("") }
 
     // Modals & Overlays state
     var showNfcScanner by remember { mutableStateOf(false) }
@@ -342,6 +343,17 @@ fun FocalRootApp(
         }
     }
 
+    LaunchedEffect(Unit) {
+        repository.onUnlinkedFromParent = {
+            childSubScreen = null
+            repository.showParentUnlockScreen = false
+            showNfcScanner = false
+            showQrScanner = false
+            showActiveFocusScreen = false
+            navigateToScreen(AppScreenState.WELCOME, clearHistory = true)
+        }
+    }
+
     FocalBackHandler(enabled = canGoBack, onBack = handleBack)
 
     FocalTheme {
@@ -440,7 +452,8 @@ fun FocalRootApp(
                         AppScreenState.PARENT_LOGIN -> {
                             LoginScreen(
                                 onLoginSuccess = {
-                                    val focusMethodChosen = FocalLocalStorage.getBoolean("KEY_FOCUS_METHOD_CHOSEN", false)
+                                    val focusMethodChosen = FocalLocalStorage.getBoolean("KEY_FOCUS_METHOD_CHOSEN", false) ||
+                                            FocalLocalStorage.getBoolean("KEY_ONBOARDING_DONE", false)
                                     if (!focusMethodChosen) {
                                         navigateToScreen(AppScreenState.FOCUS_METHOD)
                                     } else {
@@ -540,13 +553,13 @@ fun FocalRootApp(
                                 id = "req_done",
                                 code = "000000",
                                 parentId = "parent_01",
-                                parentName = repository.controllerUser.name.ifBlank { "Priya Sharma" },
-                                parentInitials = "PS",
+                                parentName = repository.controllerUser.name.ifBlank { "Parent" },
+                                parentInitials = if (repository.controllerUser.name.isNotBlank()) com.focal.app.ui.child.components.getAvatarInitials(repository.controllerUser.name) else "P",
                                 childId = "child_01",
-                                childName = repository.currentUser.name.ifBlank { "Aarav" },
-                                childInitials = "AR",
-                                childGrade = "Class 10 · Student",
-                                pairedCardId = "FC0001",
+                                childName = repository.currentUser.name.ifBlank { "Child" },
+                                childInitials = if (repository.currentUser.name.isNotBlank()) com.focal.app.ui.child.components.getAvatarInitials(repository.currentUser.name) else "C",
+                                childGrade = "",
+                                pairedCardId = null,
                                 expiresAtMs = 0L,
                                 state = com.focal.app.pairing.PairState.APPROVED
                             )
@@ -889,7 +902,21 @@ fun FocalRootApp(
                         onDismiss = { showQrScanner = false },
                         onQrScanned = { qr ->
                             showQrScanner = false
-                            if (isSessionActive) {
+                            if (qr.token.startsWith("focal://focus", ignoreCase = true) || qr.token.startsWith("FOCAL_FAMILY_QR", ignoreCase = true)) {
+                                repository.scanFamilyFocusQr(qr.token) { res ->
+                                    res.fold(
+                                        onSuccess = { msg ->
+                                            PlatformPermissionsHelper.showToast(msg)
+                                            if (!isSessionActive) {
+                                                showActiveFocusScreen = true
+                                            }
+                                        },
+                                        onFailure = { err ->
+                                            PlatformPermissionsHelper.showToast(err.message ?: "QR error")
+                                        }
+                                    )
+                                }
+                            } else if (isSessionActive) {
                                 focusEngine.endFocus(TriggerType.QR, qr.token)
                             } else {
                                 val res = focusEngine.startFocusWithQr(qr.token, currentUser)

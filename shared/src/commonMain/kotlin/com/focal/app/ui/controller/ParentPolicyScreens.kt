@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -53,6 +54,7 @@ import com.focal.app.ui.child.components.SecondaryButton
 import com.focal.app.ui.components.FocalIcons
 import com.focal.app.ui.child.components.FocalSwitch
 import com.focal.app.ui.components.PlatformPermissionsHelper
+import com.focal.app.ui.components.decodeBase64PngToImageBitmap
 import com.focal.app.ui.theme.ChildColors
 import com.focal.app.ui.theme.LocalChildTypography
 
@@ -551,8 +553,11 @@ fun PolicyEditorScreen(
                 val appsSubtitle = if (selectedApps.isEmpty()) {
                     "None yet"
                 } else {
-                    val firstThree = selectedApps.take(3).joinToString(", ")
-                    val remaining = selectedApps.size - 3
+                    val labels = selectedApps.map { id ->
+                        repository.childInstalledApps.find { it.packageName == id || it.appName == id }?.appName ?: id
+                    }
+                    val firstThree = labels.take(3).joinToString(", ")
+                    val remaining = labels.size - 3
                     if (remaining > 0) "$firstThree +$remaining" else firstThree
                 }
 
@@ -934,32 +939,52 @@ fun AppPickerScreen(
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("All") }
+    var selectedChildId by remember { mutableStateOf("ALL") }
 
     // Categories
     val categories = listOf("All", "Social", "Video", "Games", "Shopping", "Browsers", "Other")
 
-    // Filter out unblockable apps (Phone, Dialer, Settings, FOCAL, system UI, emergency, launcher)
-    val blockableApps = remember(repository.childInstalledApps) {
-        repository.childInstalledApps.filter { repository.isAppBlockable(it) }
+    // Filter by selected child switcher and unblockable apps
+    val blockableApps = remember(repository.childInstalledApps, selectedChildId) {
+        val apps = if (selectedChildId == "ALL") {
+            repository.childInstalledApps
+        } else {
+            repository.childInstalledApps.filter { it.childId == selectedChildId }
+        }
+        apps.filter { repository.isAppBlockable(it) }
     }
 
     // Sort: selected apps sorted to top when the screen opens
-    val sortedInitialApps = remember {
+    val sortedInitialApps = remember(blockableApps) {
         val initiallySelected = initialSelectedApps.toSet()
         blockableApps.sortedWith(
-            compareByDescending<InstalledApp> { it.appName in initiallySelected }
+            compareByDescending<InstalledApp> { (it.packageName in initiallySelected) || (it.appName in initiallySelected) }
                 .thenBy { it.appName.lowercase() }
         )
     }
 
+    // Target child name for empty state
+    val targetChildName = remember(selectedChildId, repository.childrenList) {
+        if (selectedChildId != "ALL") {
+            repository.childrenList.find { it.id == selectedChildId }?.name ?: "your child"
+        } else {
+            repository.childrenList.firstOrNull()?.name ?: "your child"
+        }
+    }
+
     // Subtitle dynamically based on children names
-    val childrenSubtitle = remember(repository.childrenList) {
+    val childrenSubtitle = remember(repository.childrenList, selectedChildId) {
         val list = repository.childrenList
-        when (list.size) {
-            0 -> "Apps on this phone."
-            1 -> "Apps on ${list[0].name}'s phone."
-            2 -> "Apps on ${list[0].name}'s and ${list[1].name}'s phones."
-            else -> "Apps on ${list.take(2).joinToString(", ") { it.name }} and others' phones."
+        if (selectedChildId != "ALL") {
+            val name = list.find { it.id == selectedChildId }?.name ?: "Child"
+            "Apps on $name's phone."
+        } else {
+            when (list.size) {
+                0 -> "Apps on this phone."
+                1 -> "Apps on ${list[0].name}'s phone."
+                2 -> "Apps on ${list[0].name}'s and ${list[1].name}'s phones."
+                else -> "Apps on ${list.take(2).joinToString(", ") { it.name }} and others' phones."
+            }
         }
     }
 
@@ -972,6 +997,7 @@ fun AppPickerScreen(
 
             val matchesSearch = searchQuery.isBlank() ||
                     app.appName.contains(searchQuery, ignoreCase = true) ||
+                    app.packageName.contains(searchQuery, ignoreCase = true) ||
                     app.category.contains(searchQuery, ignoreCase = true)
 
             matchesCat && matchesSearch
@@ -1017,6 +1043,67 @@ fun AppPickerScreen(
                     color = ChildColors.Secondary
                 )
             )
+
+            // Child switcher at top when multiple children are linked
+            if (repository.childrenList.size > 1) {
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val isAllSelected = selectedChildId == "ALL"
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (isAllSelected) Color.White else Color(0xFF0E0E0E))
+                            .border(
+                                1.dp,
+                                if (isAllSelected) Color.White else Color(0xFF2A2A2A),
+                                RoundedCornerShape(16.dp)
+                            )
+                            .clickable { selectedChildId = "ALL" }
+                            .padding(horizontal = 14.dp, vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "All (${repository.childrenList.size})",
+                            style = typography.caption.copy(
+                                fontSize = 12.5.sp,
+                                fontWeight = if (isAllSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isAllSelected) Color.Black else Color.White
+                            )
+                        )
+                    }
+
+                    repository.childrenList.forEach { child ->
+                        val isSelected = selectedChildId == child.id
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (isSelected) Color.White else Color(0xFF0E0E0E))
+                                .border(
+                                    1.dp,
+                                    if (isSelected) Color.White else Color(0xFF2A2A2A),
+                                    RoundedCornerShape(16.dp)
+                                )
+                                .clickable { selectedChildId = child.id }
+                                .padding(horizontal = 14.dp, vertical = 7.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = child.name,
+                                style = typography.caption.copy(
+                                    fontSize = 12.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) Color.Black else Color.White
+                                )
+                            )
+                        }
+                    }
+                }
+            }
 
             Spacer(Modifier.height(16.dp))
 
@@ -1164,8 +1251,9 @@ fun AppPickerScreen(
                                                     (selectedCategory == "Browsers" && it.category.startsWith("Browser", ignoreCase = true))
                                         }
                                         .forEach { app ->
-                                            if (!currentSelected.contains(app.appName)) {
-                                                currentSelected.add(app.appName)
+                                            val id = app.packageName.ifBlank { app.appName }
+                                            if (!currentSelected.contains(id) && !currentSelected.contains(app.appName)) {
+                                                currentSelected.add(id)
                                             }
                                         }
                                 } else {
@@ -1179,122 +1267,179 @@ fun AppPickerScreen(
 
             Spacer(Modifier.height(14.dp))
 
-            // App list in ONE GlassCard with dividers
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                radius = 24.dp,
-                padding = 0.dp
-            ) {
-                if (filteredApps.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        contentAlignment = Alignment.Center
+            // Empty state if child phone hasn't opened yet to sync apps
+            if (blockableApps.isEmpty()) {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    radius = 24.dp,
+                    padding = 32.dp
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = "No apps found",
-                            style = typography.caption.copy(
-                                fontSize = 14.sp,
-                                color = ChildColors.Secondary
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(CircleShape)
+                                .background(ChildColors.IconCircleBg),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = FocalIcons.Smartphone,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
                             )
+                        }
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            text = "Open FOCAL on ${targetChildName}'s phone once to load their apps",
+                            style = typography.headline.copy(
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White
+                            ),
+                            textAlign = TextAlign.Center
                         )
                     }
-                } else {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        filteredApps.forEachIndexed { index, app ->
-                            val isChecked = currentSelected.contains(app.appName)
+                }
+            } else {
+                // App list in ONE GlassCard with dividers
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    radius = 24.dp,
+                    padding = 0.dp
+                ) {
+                    if (filteredApps.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No apps found",
+                                style = typography.caption.copy(
+                                    fontSize = 14.sp,
+                                    color = ChildColors.Secondary
+                                )
+                            )
+                        }
+                    } else {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            filteredApps.forEachIndexed { index, app ->
+                                val isChecked = currentSelected.contains(app.packageName) || currentSelected.contains(app.appName)
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        if (isChecked) {
-                                            currentSelected.remove(app.appName)
-                                        } else {
-                                            currentSelected.add(app.appName)
-                                        }
-                                    }
-                                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // 36dp rounded tile with app letter / icon
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(Color(0xFF171717))
-                                        .border(1.dp, Color(0xFF262626), RoundedCornerShape(10.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = app.appName.firstOrNull()?.toString() ?: "?",
-                                        style = typography.headline.copy(
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                    )
-                                }
-
-                                Spacer(Modifier.width(14.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = app.appName,
-                                        style = typography.headline.copy(
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Color.White
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        text = if (app.childOwnerName.isNotBlank()) "${app.category} · ${app.childOwnerName}" else app.category,
-                                        style = typography.caption.copy(
-                                            fontSize = 12.sp,
-                                            color = ChildColors.Secondary
-                                        ),
-                                        maxLines = 2
-                                    )
-                                }
-
-                                Spacer(Modifier.width(12.dp))
-
-                                // Checkbox on the right (24dp, radius 7; checked = white fill + black check; unchecked = #3A3A3A outline)
-                                Box(
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .clip(RoundedCornerShape(7.dp))
-                                        .background(if (isChecked) Color.White else Color.Transparent)
-                                        .border(
-                                            width = if (isChecked) 1.dp else 1.5.dp,
-                                            color = if (isChecked) Color.White else Color(0xFF3A3A3A),
-                                            shape = RoundedCornerShape(7.dp)
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (isChecked) {
-                                        Icon(
-                                            imageVector = FocalIcons.Check,
-                                            contentDescription = "Checked",
-                                            tint = Color.Black,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                    }
-                                }
-                            }
-
-                            if (index < filteredApps.size - 1) {
-                                Box(
+                                Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(start = 68.dp)
-                                        .height(1.dp)
-                                        .background(Color(0xFF1F1F1F))
+                                        .clickable {
+                                            val idToToggle = app.packageName.ifBlank { app.appName }
+                                            if (isChecked) {
+                                                currentSelected.remove(app.packageName)
+                                                currentSelected.remove(app.appName)
+                                            } else {
+                                                currentSelected.add(idToToggle)
+                                            }
+                                        }
+                                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // 36dp rounded tile with app icon or letter fallback
+                                    val decodedBitmap = remember(app.iconPng) {
+                                        decodeBase64PngToImageBitmap(app.iconPng)
+                                    }
+                                    if (decodedBitmap != null) {
+                                        Image(
+                                            bitmap = decodedBitmap,
+                                            contentDescription = app.appName,
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color(0xFF171717))
+                                                .border(1.dp, Color(0xFF262626), RoundedCornerShape(10.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = app.appName.firstOrNull()?.toString() ?: "?",
+                                                style = typography.headline.copy(
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.width(14.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = app.appName,
+                                            style = typography.headline.copy(
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color.White
+                                            ),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(Modifier.height(2.dp))
+                                        val ownerLabel = if (selectedChildId == "ALL" && app.childOwnerName.isNotBlank()) {
+                                            " · ${app.childOwnerName}"
+                                        } else ""
+                                        Text(
+                                            text = "${app.category}$ownerLabel",
+                                            style = typography.caption.copy(
+                                                fontSize = 12.sp,
+                                                color = ChildColors.Secondary
+                                            ),
+                                            maxLines = 2
+                                        )
+                                    }
+
+                                    Spacer(Modifier.width(12.dp))
+
+                                    // Checkbox on the right (24dp, radius 7; checked = white fill + black check; unchecked = #3A3A3A outline)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(RoundedCornerShape(7.dp))
+                                            .background(if (isChecked) Color.White else Color.Transparent)
+                                            .border(
+                                                width = if (isChecked) 1.dp else 1.5.dp,
+                                                color = if (isChecked) Color.White else Color(0xFF3A3A3A),
+                                                shape = RoundedCornerShape(7.dp)
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isChecked) {
+                                            Icon(
+                                                imageVector = FocalIcons.Check,
+                                                contentDescription = "Checked",
+                                                tint = Color.Black,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (index < filteredApps.size - 1) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 68.dp)
+                                            .height(1.dp)
+                                            .background(Color(0xFF1F1F1F))
                                     )
+                                }
                             }
                         }
                     }

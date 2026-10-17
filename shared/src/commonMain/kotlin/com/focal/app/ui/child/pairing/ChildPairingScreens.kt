@@ -44,6 +44,7 @@ import com.focal.app.ui.child.components.*
 import com.focal.app.ui.components.FocalIcons
 import com.focal.app.ui.components.PlatformCameraScanner
 import com.focal.app.ui.components.PlatformPermissionsHelper
+import com.focal.app.ui.components.rememberCameraPermissionLauncher
 import com.focal.app.ui.theme.ChildColors
 import com.focal.app.ui.theme.LocalChildTypography
 import kotlinx.coroutines.delay
@@ -319,10 +320,15 @@ fun PairScreen(
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                // SecondaryButton "Connect"
+                // SecondaryButton "Connect" / "Try again"
                 val isButtonEnabled = codeInput.length == 6 && !isLoading
+                val buttonText = when {
+                    isLoading -> "Connecting…"
+                    errorMessage != null && errorMessage!!.contains("declined", ignoreCase = true) -> "Try again"
+                    else -> "Connect"
+                }
                 SecondaryButton(
-                    text = if (isLoading) "Connecting…" else "Connect",
+                    text = buttonText,
                     onClick = { submitCode() },
                     enabled = isButtonEnabled,
                     modifier = Modifier.fillMaxWidth()
@@ -560,7 +566,32 @@ fun ScanParentQrScreen(
     val typography = LocalChildTypography.current
     val coroutineScope = rememberCoroutineScope()
 
+    var hasCameraPermission by remember {
+        mutableStateOf(PlatformPermissionsHelper.isCameraPermissionGranted())
+    }
+    var permissionRequested by remember { mutableStateOf(false) }
+
+    val cameraPermissionLauncher = rememberCameraPermissionLauncher { granted ->
+        hasCameraPermission = granted
+        permissionRequested = true
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) {
+            permissionRequested = true
+            cameraPermissionLauncher()
+        }
+        while (true) {
+            delay(1000)
+            val current = PlatformPermissionsHelper.isCameraPermissionGranted()
+            if (current != hasCameraPermission) {
+                hasCameraPermission = current
+            }
+        }
+    }
+
     var torchEnabled by remember { mutableStateOf(false) }
+    var isScanning by remember { mutableStateOf(true) }
     var scanStatus by remember { mutableStateOf<ScanStatus>(ScanStatus.Searching) }
     val shakeOffset = remember { Animatable(0f) }
 
@@ -576,7 +607,8 @@ fun ScanParentQrScreen(
     )
 
     fun handleQrDetected(payload: String) {
-        if (scanStatus is ScanStatus.Success) return
+        if (!isScanning || scanStatus is ScanStatus.Success) return
+        isScanning = false
         coroutineScope.launch {
             val result = repository.redeemQr(payload)
             result.onSuccess { request ->
@@ -584,7 +616,14 @@ fun ScanParentQrScreen(
                 delay(300)
                 onQrRedeemed(request)
             }.onFailure { ex ->
-                scanStatus = ScanStatus.Invalid(ex.message ?: "That's not a pairing QR")
+                val msg = if (ex.message?.contains("pairing", ignoreCase = true) == true ||
+                    ex.message?.contains("FOCAL", ignoreCase = true) == true
+                ) {
+                    "This isn't a FOCAL pairing code"
+                } else {
+                    ex.message ?: "This isn't a FOCAL pairing code"
+                }
+                scanStatus = ScanStatus.Invalid(msg)
                 shakeOffset.snapTo(0f)
                 shakeOffset.animateTo(
                     targetValue = 0f,
@@ -601,9 +640,115 @@ fun ScanParentQrScreen(
                 delay(1800)
                 if (scanStatus is ScanStatus.Invalid) {
                     scanStatus = ScanStatus.Searching
+                    isScanning = true
                 }
             }
         }
+    }
+
+    if (!hasCameraPermission && permissionRequested) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(horizontal = 24.dp)
+        ) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clickable { onBack() },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(ChildColors.Surface)
+                        .border(1.dp, ChildColors.Border, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = FocalIcons.Close,
+                        contentDescription = "Close",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(ChildColors.Surface)
+                        .border(1.5.dp, ChildColors.BorderStrong, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = FocalIcons.QrCode,
+                        contentDescription = "Camera",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(
+                    text = "Camera access needed",
+                    style = typography.title.copy(
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    ),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "To scan your parent's pairing QR code, FOCAL needs camera access. Please grant permission in Settings or enter the code manually.",
+                    style = typography.caption.copy(
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        color = ChildColors.Secondary
+                    ),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                PrimaryButton(
+                    text = "Open Settings",
+                    onClick = { PlatformPermissionsHelper.openAppDetailsSettings() },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                SecondaryButton(
+                    text = "Enter code instead",
+                    onClick = onEnterCodeClick,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars))
+        }
+        return
     }
 
     Box(
@@ -615,6 +760,7 @@ fun ScanParentQrScreen(
         PlatformCameraScanner(
             modifier = Modifier.fillMaxSize(),
             torchEnabled = torchEnabled,
+            isScanning = isScanning,
             onQrDetected = { qrPayload ->
                 handleQrDetected(qrPayload)
             }
@@ -834,7 +980,7 @@ fun ScanParentQrScreen(
 
 private sealed class ScanStatus {
     object Searching : ScanStatus()
-    data class Invalid(val message: String = "That's not a pairing QR") : ScanStatus()
+    data class Invalid(val message: String = "This isn't a FOCAL pairing code") : ScanStatus()
     object Success : ScanStatus()
 }
 
@@ -877,7 +1023,7 @@ fun WaitingApprovalScreen(
         }
         if (remainingSeconds <= 0) {
             repository.cancelRequest(request.id)
-            onDeclinedOrExpired("The request expired. Try connecting again.")
+            onDeclinedOrExpired("Code expired, ask for a new one")
         }
     }
 
@@ -891,11 +1037,11 @@ fun WaitingApprovalScreen(
                 }
                 PairState.DECLINED -> {
                     repository.cancelRequest(request.id)
-                    onDeclinedOrExpired("Your parent declined the request.")
+                    onDeclinedOrExpired("Your parent declined")
                 }
                 PairState.EXPIRED -> {
                     repository.cancelRequest(request.id)
-                    onDeclinedOrExpired("The request expired. Try connecting again.")
+                    onDeclinedOrExpired("Code expired, ask for a new one")
                 }
                 PairState.PENDING -> {
                     // Waiting
@@ -980,8 +1126,9 @@ fun WaitingApprovalScreen(
         Spacer(modifier = Modifier.height(10.dp))
 
         // Title: "Ask Priya to tap Allow on her phone"
+        val parentNameClean = request.parentName.trim().split(" ").firstOrNull()?.ifEmpty { null } ?: (if (com.focal.app.config.FocalConfig.isDemoMode) "Priya" else "your parent")
         Text(
-            text = "Ask ${request.parentName.split(" ").firstOrNull() ?: "Priya"} to tap Allow on her phone",
+            text = if (parentNameClean == "your parent") "Ask your parent to tap Allow on their phone" else "Ask $parentNameClean to tap Allow on their phone",
             style = typography.title.copy(
                 fontSize = 24.sp,
                 lineHeight = 30.sp,
@@ -996,7 +1143,7 @@ fun WaitingApprovalScreen(
 
         // Subtitle
         Text(
-            text = "A request was sent to ${request.parentName.split(" ").firstOrNull() ?: "Priya"}'s phone. This screen will update automatically.",
+            text = if (parentNameClean == "your parent") "A request was sent to your parent's phone. This screen will update automatically." else "A request was sent to $parentNameClean's phone. This screen will update automatically.",
             style = typography.caption.copy(
                 fontSize = 14.sp,
                 lineHeight = 20.sp,
@@ -1152,7 +1299,7 @@ fun PairedSuccessScreen(
         }
     }
 
-    val parentFirstName = request.parentName.split(" ").firstOrNull() ?: "Priya"
+    val parentFirstName = request.parentName.trim().split(" ").firstOrNull()?.ifEmpty { null } ?: (if (com.focal.app.config.FocalConfig.isDemoMode) "Priya" else "your parent")
 
     Column(
         modifier = Modifier
@@ -1273,8 +1420,9 @@ fun PairedSuccessScreen(
         Spacer(modifier = Modifier.height(10.dp))
 
         // Title: "You're linked to Priya"
+        val linkedTitle = if (parentFirstName == "your parent") "You're linked to your parent" else "You're linked to $parentFirstName"
         Text(
-            text = "You're linked to $parentFirstName",
+            text = linkedTitle,
             style = typography.display.copy(
                 fontSize = 26.sp,
                 lineHeight = 32.sp,
@@ -1366,7 +1514,7 @@ fun PairedSuccessScreen(
                 )
 
                 // Item 2: FOCAL card ready
-                val cardId = request.pairedCardId ?: "FC0001"
+                val cardId = request.pairedCardId ?: (if (com.focal.app.config.FocalConfig.isDemoMode) "FC0001" else "")
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

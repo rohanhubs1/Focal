@@ -94,7 +94,11 @@ fun ChildDashboardScreen(
 ) {
     val typography = LocalChildTypography.current
     val user = repository.currentUser
-    val displayName = if (user.name.contains("Rahul", ignoreCase = true) || user.name.isBlank()) "Aarav" else user.name
+    val displayName = if (com.focal.app.config.FocalConfig.isDemoMode) {
+        if (user.name.contains("Rahul", ignoreCase = true) || user.name.isBlank()) "Aarav" else user.name
+    } else {
+        user.name.ifBlank { "Child" }
+    }
     val isActive = focusEngine.sessionState == SessionState.ACTIVE
     val currentSession = focusEngine.currentSession
 
@@ -748,7 +752,7 @@ fun ChildDashboardScreen(
                     cardListeningSubtitle = cardListeningSubtitle,
                     onCardTapped = {
                         val userCards = repository.nfcCards.filter { (it.familyId == user.familyId || it.assignedChildId == user.id || it.ownerId == user.id) && it.isEnabled }
-                        val pairedCard = userCards.firstOrNull()?.cardId ?: "FC0001"
+                        val pairedCard = userCards.firstOrNull()?.cardId ?: (if (com.focal.app.config.FocalConfig.isDemoMode) "FC0001" else "")
                         val res = focusEngine.endFocusWithNfc(pairedCard, user)
                         if (res.isSuccess) {
                             showEndFocusSheet = false
@@ -1656,10 +1660,13 @@ fun InsightsScreen(
     val typography = LocalChildTypography.current
     val isParentView = childId != null
     val targetChild = if (isParentView) {
-        repository.childrenList.find { it.id == childId } ?: repository.childrenList.first()
+        repository.childrenList.find { it.id == childId }
+            ?: repository.childrenList.firstOrNull()
+            ?: ChildProfile(id = "", userId = "", controllerId = "", name = "Child", age = 15, grade = "Student", todayFocusMinutes = 0, defaultFocusMinutes = 90, defaultPolicyId = "pol_study", isOnline = false, isFocusing = false, remainingMinutes = 0, focusTotalMinutes = 0, pairedCardId = null, deviceName = "")
     } else {
         repository.childrenList.find { it.userId == repository.currentUser.id || it.id == "child_1" }
-            ?: repository.childrenList.first()
+            ?: repository.childrenList.firstOrNull()
+            ?: ChildProfile(id = "", userId = repository.currentUser.id, controllerId = "", name = repository.currentUser.name.ifBlank { "Child" }, age = 15, grade = "Student", todayFocusMinutes = 0, defaultFocusMinutes = 90, defaultPolicyId = "pol_study", isOnline = false, isFocusing = false, remainingMinutes = 0, focusTotalMinutes = 0, pairedCardId = null, deviceName = "")
     }
     val childName = targetChild.name
     val childGrade = targetChild.grade.ifBlank { "Student" }
@@ -1685,7 +1692,7 @@ fun InsightsScreen(
         val blockedFromEvents = childEvents.count {
             it.type == ActivityEventType.APP_BLOCKED || it.type == ActivityEventType.SITE_BLOCKED
         }
-        if (blockedFromEvents > 0) blockedFromEvents else if (isThisPhone) 14 else 0
+        if (blockedFromEvents > 0) blockedFromEvents else if (isThisPhone && com.focal.app.config.FocalConfig.isDemoMode) 14 else 0
     }
 
     val insightsData = remember(selectedRange, childTodayFocusMinutes, isThisPhone, blockedCount) {
@@ -1697,11 +1704,11 @@ fun InsightsScreen(
             )
         } else {
             val rangeFocusMinutes = when (selectedRange) {
-                InsightsRange.WEEK -> (childTodayFocusMinutes * 5).coerceAtLeast(120)
-                InsightsRange.MONTH -> (childTodayFocusMinutes * 20).coerceAtLeast(600)
-                InsightsRange.LIFETIME -> (childTodayFocusMinutes * 120).coerceAtLeast(3600)
+                InsightsRange.WEEK -> (childTodayFocusMinutes * 5).coerceAtLeast(if (com.focal.app.config.FocalConfig.isDemoMode) 120 else 0)
+                InsightsRange.MONTH -> (childTodayFocusMinutes * 20).coerceAtLeast(if (com.focal.app.config.FocalConfig.isDemoMode) 600 else 0)
+                InsightsRange.LIFETIME -> (childTodayFocusMinutes * 120).coerceAtLeast(if (com.focal.app.config.FocalConfig.isDemoMode) 3600 else 0)
             }
-            val dailyAvg = (rangeFocusMinutes / (if (selectedRange == InsightsRange.WEEK) 7 else if (selectedRange == InsightsRange.MONTH) 30 else 180)).coerceAtLeast(30)
+            val dailyAvg = if (rangeFocusMinutes > 0) (rangeFocusMinutes / (if (selectedRange == InsightsRange.WEEK) 7 else if (selectedRange == InsightsRange.MONTH) 30 else 180)).coerceAtLeast(if (com.focal.app.config.FocalConfig.isDemoMode) 30 else 0) else 0
 
             val pairedBars = mutableListOf<PairedBarData>()
             when (selectedRange) {
@@ -2793,9 +2800,11 @@ fun ConnectedParentScreen(
     val typography = LocalChildTypography.current
     val parent = repository.controllerUser
     val isLinked = parent.name.isNotBlank() || repository.childrenList.isNotEmpty()
-    val parentDisplayName = if (parent.name.isBlank()) "Priya Sharma" else parent.name
+    val parentDisplayName = if (parent.name.isBlank()) {
+        if (com.focal.app.config.FocalConfig.isDemoMode) "Priya Sharma" else "Parent"
+    } else parent.name
     val parentInitials = com.focal.app.ui.child.components.getAvatarInitials(parentDisplayName)
-    val relation = "Mom"
+    val relation = if (com.focal.app.config.FocalConfig.isDemoMode) "Mom" else "Parent"
 
     val manufacturer = remember { PlatformPermissionsHelper.getDeviceManufacturer() }
     val androidVer = remember { PlatformPermissionsHelper.getAndroidVersion() }
@@ -2990,8 +2999,10 @@ fun FocalCardScreen(
     val cardId = pairedCard?.cardId ?: ""
 
     val parent = repository.controllerUser
-    val parentDisplayName = if (parent.name.isBlank()) "Priya Sharma" else parent.name
-    val relation = "Mom"
+    val parentDisplayName = if (parent.name.isBlank()) {
+        if (com.focal.app.config.FocalConfig.isDemoMode) "Priya Sharma" else "Parent"
+    } else parent.name
+    val relation = if (com.focal.app.config.FocalConfig.isDemoMode) "Mom" else "Parent"
 
     var showTestCardSheet by remember { mutableStateOf(false) }
 
@@ -4610,18 +4621,30 @@ fun ChildProfileScreen(
     val scrollState = rememberScrollState()
 
     val user = repository.currentUser
-    val displayName = if (user.name.contains("Rahul", ignoreCase = true)) "Aarav" else user.name
+    val displayName = if (com.focal.app.config.FocalConfig.isDemoMode) {
+        if (user.name.contains("Rahul", ignoreCase = true)) "Aarav" else user.name
+    } else {
+        user.name.ifBlank { "Child" }
+    }
     val displayInitials = com.focal.app.ui.child.components.getAvatarInitials(displayName)
 
     val parent = repository.controllerUser
-    val parentDisplayName = if (parent.name.isBlank()) "Priya Sharma" else parent.name
+    val parentDisplayName = if (parent.name.isBlank()) {
+        if (com.focal.app.config.FocalConfig.isDemoMode) "Priya Sharma" else "Parent"
+    } else parent.name
     val parentInitials = com.focal.app.ui.child.components.getAvatarInitials(parentDisplayName)
 
-    val streakDays = remember { StreakRepository.instance.getStreak().coerceAtLeast(3) }
-    val focusTodayMinutes = remember { 135 } // 2h 15m
+    val streakDays = remember {
+        if (com.focal.app.config.FocalConfig.isDemoMode) StreakRepository.instance.getStreak().coerceAtLeast(3)
+        else StreakRepository.instance.getStreak()
+    }
+    val focusTodayMinutes = if (com.focal.app.config.FocalConfig.isDemoMode) 135 else FocusEngine.instance.todayFocusMinutes
     val isUsageGranted = PlatformPermissionsHelper.isUsageAccessEnabled()
     val screenTimeMinutes = remember(isUsageGranted) {
-        if (isUsageGranted) PlatformPermissionsHelper.getRealDailyScreenTimeMinutes().coerceAtLeast(192) else 0
+        if (isUsageGranted) {
+            if (com.focal.app.config.FocalConfig.isDemoMode) PlatformPermissionsHelper.getRealDailyScreenTimeMinutes().coerceAtLeast(192)
+            else PlatformPermissionsHelper.getRealDailyScreenTimeMinutes()
+        } else 0
     }
 
     val isParentUnlockActive = repository.isParentGuardUnlocked()
@@ -4714,9 +4737,9 @@ fun ChildProfileScreen(
                                 ),
                                 maxLines = 2
                             )
-                            Spacer(modifier = Modifier.height(3.dp))
+                            val gradeText = childProfile?.grade?.ifBlank { "Student" } ?: (if (com.focal.app.config.FocalConfig.isDemoMode) "Class 10 · Student" else "Student")
                             Text(
-                                text = "Class 10 · Student",
+                                text = gradeText,
                                 style = typography.caption.copy(
                                     color = ChildColors.Secondary,
                                     fontSize = 13.sp
@@ -4725,36 +4748,38 @@ fun ChildProfileScreen(
                             )
                         }
 
-                        // Streak StatusPill
-                        Box(
-                            modifier = Modifier
-                                .height(32.dp)
-                                .clip(CircleShape)
-                                .border(1.dp, Color.White, CircleShape)
-                                .background(Color.Transparent)
-                                .padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        // Streak StatusPill (hidden when 0)
+                        if (streakDays > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .height(32.dp)
+                                    .clip(CircleShape)
+                                    .border(1.dp, Color.White, CircleShape)
+                                    .background(Color.Transparent)
+                                    .padding(horizontal = 12.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = FocalIcons.Lightning,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Text(
-                                    text = if (streakDays > 0) "$streakDays day streak" else "Start a streak",
-                                    style = typography.caption.copy(
-                                        color = Color.White,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 12.5.sp
-                                    ),
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = FocalIcons.Lightning,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = "$streakDays day streak",
+                                        style = typography.caption.copy(
+                                            color = Color.White,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 12.5.sp
+                                        ),
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
                             }
                         }
                     }
@@ -4870,9 +4895,9 @@ fun ChildProfileScreen(
                                 maxLines = 1,
                                 softWrap = false
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
+                            val relationSuffix = if (com.focal.app.config.FocalConfig.isDemoMode) " (Mom)" else ""
                             Text(
-                                text = "$parentDisplayName (Mom)",
+                                text = "$parentDisplayName$relationSuffix",
                                 style = typography.headline.copy(
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.SemiBold,

@@ -7,5 +7,6 @@ import androidx.compose.ui.Modifier
 expect fun PlatformCameraScanner(
     modifier: Modifier = Modifier,
     torchEnabled: Boolean = false,
+    isScanning: Boolean = true,
     onQrDetected: (String) -> Unit
 )

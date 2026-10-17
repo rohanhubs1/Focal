@@ -1143,38 +1143,39 @@ fun ConnectPhoneScreen(
                 }
             }
 
-            Spacer(Modifier.height(18.dp))
+            // Demo connection confirmation button (demo mode only)
+            if (com.focal.app.config.FocalConfig.isDemoMode) {
+                Spacer(Modifier.height(18.dp))
+                SecondaryButton(
+                    text = "${childName}'s phone is connected",
+                    onClick = {
+                        val childIdx = repository.childrenList.indexOfFirst { it.id == childId }
+                        if (childIdx >= 0) {
+                            val child = repository.childrenList[childIdx]
+                            repository.childrenList[childIdx] = child.copy(
+                                isOnline = true,
+                                pairedCardId = "FC0001",
+                                deviceName = "Realme · Android 14"
+                            )
+                        }
+                        pairingRepository.approveChildPairing(childId)
+                        onAllowSuccess()
+                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                )
 
-            // Demo connection confirmation button
-            SecondaryButton(
-                text = "${childName}'s phone is connected",
-                onClick = {
-                    val childIdx = repository.childrenList.indexOfFirst { it.id == childId }
-                    if (childIdx >= 0) {
-                        val child = repository.childrenList[childIdx]
-                        repository.childrenList[childIdx] = child.copy(
-                            isOnline = true,
-                            pairedCardId = "FC0001",
-                            deviceName = "Realme · Android 14"
-                        )
-                    }
-                    pairingRepository.approveChildPairing(childId)
-                    onAllowSuccess()
-                },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-            )
+                Spacer(Modifier.height(8.dp))
 
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                text = "Demo mode · tap when your child's phone shows Connected",
-                style = typography.caption.copy(
-                    fontSize = 12.sp,
-                    color = Color(0xFF6B6B6B)
-                ),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
+                Text(
+                    text = "Demo mode · tap when your child's phone shows Connected",
+                    style = typography.caption.copy(
+                        fontSize = 12.sp,
+                        color = Color(0xFF6B6B6B)
+                    ),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
             if (showCopiedSnackbar) {
                 Spacer(Modifier.height(12.dp))
@@ -1571,21 +1572,19 @@ fun AddChildRootFlow(
                     onDismiss()
                 },
                 onContinue = { name, grade ->
-                    // Add new child record with deviceName = "" (Phone not connected yet)
-                    val newChild = ChildProfile(
-                        id = "child_${currentTimeMillis()}",
-                        userId = "user_${name.lowercase().replace(" ", "")}",
-                        controllerId = repository.currentUser.id.ifBlank { "parent_01" },
+                    // Add new child record via repository so child doc is created in Firestore immediately
+                    val (newChild, _) = repository.addChild(
                         name = name,
+                        age = 15,
+                        emailOrPhone = ""
+                    )
+                    val updatedChild = newChild.copy(
                         grade = grade.ifBlank { "Student" },
                         deviceName = "", // Phone not connected yet
-                        isOnline = false,
-                        pairedCardId = null,
-                        todayFocusMinutes = 0,
-                        screenTimeMinutes = 0
+                        isOnline = false
                     )
-                    repository.childrenList.add(newChild)
-                    activeChild = newChild
+                    repository.updateChild(updatedChild)
+                    activeChild = updatedChild
                     step = AddChildStep.STEP_2_CONNECT
                 },
                 existingChildren = repository.childrenList

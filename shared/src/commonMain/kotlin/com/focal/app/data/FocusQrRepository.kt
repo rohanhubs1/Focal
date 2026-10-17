@@ -23,7 +23,10 @@ interface FocusQrRepository {
     fun validateFamilyQr(payload: String, familyId: String = "family_1"): Boolean
 
     companion object {
-        val instance: FocusQrRepository by lazy { LocalFocusQrRepository() }
+        var instance: FocusQrRepository = LocalFocusQrRepository()
+        fun install(impl: FocusQrRepository) {
+            instance = impl
+        }
     }
 }
 

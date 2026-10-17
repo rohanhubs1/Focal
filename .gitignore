@@ -25,5 +25,11 @@ GoogleService-Info.plist
 !public_key.pem
 *.p12
 *.p8
+*serviceAccount*.json
 service-account*.json
 .firebase/
+factory_secret.bin
+nfcguard.db
+.env
+.env.*
+

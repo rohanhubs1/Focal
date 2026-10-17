@@ -60,7 +60,7 @@ class FocusEngine private constructor() {
         sessionState = SessionState.IDLE
         currentSession = null
         remainingSeconds = 0
-        todayFocusMinutes = repository.childrenList.find { it.id == "child_1" || it.userId == repository.currentUser.id }?.todayFocusMinutes ?: 135
+        todayFocusMinutes = repository.childrenList.find { it.id == "child_1" || it.userId == repository.currentUser.id }?.todayFocusMinutes ?: 0
         checkAndUpdatePermissions()
     }
 
@@ -136,8 +136,11 @@ class FocusEngine private constructor() {
             // Immediately resume blocking if focus is currently active!
             if (sessionState == SessionState.ACTIVE) {
                 val current = currentSession
-                val endsAt = current?.startTimeMillis?.plus((current.targetDurationMinutes * 60 * 1000L))
-                    ?: (currentTimeMillis() + remainingSeconds * 1000L)
+                val nowWall = currentTimeMillis()
+                val nowElapsed = com.focal.app.streak.getDeviceElapsedRealtime()
+                val endsAtWall = current?.endTimeMillis ?: (current?.startTimeMillis?.plus((current.targetDurationMinutes * 60 * 1000L))
+                    ?: (nowWall + remainingSeconds * 1000L))
+                val endsAtElapsed = nowElapsed + (endsAtWall - nowWall).coerceAtLeast(0L)
                 val policy = repository.policies.find { it.id == current?.policyId }
                 val blockedApps = policy?.blockedApps ?: listOf(
                     "Instagram", "YouTube", "TikTok", "Amazon", "BGMI", "Chrome", "Snapchat", "Netflix", "Roblox", "Clash of Clans"
@@ -147,7 +150,7 @@ class FocusEngine private constructor() {
 
                 com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
                     active = true,
-                    endsAtElapsed = endsAt,
+                    endsAtElapsed = endsAtElapsed,
                     policy = com.focal.app.model.FocusPolicyData(
                         blockedApps = blockedApps,
                         blockedPackages = resolvedPkgs,
@@ -321,9 +324,10 @@ class FocusEngine private constructor() {
         }
 
         val resolvedPkgs = policy.blockedApps.map { com.focal.app.protection.ProtectionEngine.APP_NAME_TO_PACKAGE[it] ?: it }.toSet()
+        val endsAtElapsed = nowElapsed + (endsAt - now).coerceAtLeast(0L)
         com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
             active = true,
-            endsAtElapsed = endsAt,
+            endsAtElapsed = endsAtElapsed,
             policy = com.focal.app.model.FocusPolicyData(
                 blockedApps = policy.blockedApps,
                 blockedPackages = resolvedPkgs,
@@ -332,6 +336,7 @@ class FocusEngine private constructor() {
         )
 
         startTimer()
+        repository.recordSessionStart(newSession)
 
         // Push real-time telemetry to Cloud Sync Engine for Controller Device
         com.focal.app.data.FocalSyncEngine.instance.reportChildTelemetry(
@@ -433,6 +438,60 @@ class FocusEngine private constructor() {
             policy = customPolicy,
             user = targetUser
         )
+    }
+
+    fun startFocusWithSyncedSession(
+        sessionId: String,
+        policy: FocusPolicy,
+        startTimeMillis: Long,
+        endTimeMillis: Long
+    ) {
+        val now = currentTimeMillis()
+        val remaining = ((endTimeMillis - now) / 1000L).toInt().coerceAtLeast(0)
+        val targetMins = ((endTimeMillis - startTimeMillis) / 60000L).toInt().coerceAtLeast(1)
+        val nowElapsed = com.focal.app.streak.getDeviceElapsedRealtime()
+
+        val newSession = FocusSession(
+            id = sessionId,
+            userId = repository.currentUser.id,
+            childName = repository.currentUser.name,
+            policyId = policy.id,
+            policyName = policy.name,
+            mode = policy.mode,
+            triggerType = TriggerType.REMOTE_PARENT,
+            startTimeMillis = startTimeMillis,
+            targetDurationMinutes = targetMins,
+            remainingSeconds = remaining,
+            status = SessionState.ACTIVE,
+            blockedAttempts = 0,
+            distractionsPrevented = 0,
+            emergencyExits = 0,
+            focusScore = 85,
+            blockedAppsCount = policy.blockedApps.size,
+            blockedWebsitesCount = policy.blockedWebsites.size,
+            endTimeMillis = endTimeMillis,
+            startElapsedRealtime = nowElapsed
+        )
+        currentSession = newSession
+        sessionState = SessionState.ACTIVE
+        remainingSeconds = remaining
+
+        com.focal.app.data.FocalLocalStorage.saveLong("KEY_FOCUS_ENDS_AT_MILLIS", endTimeMillis)
+        com.focal.app.data.FocalLocalStorage.saveLong("KEY_FOCUS_START_ELAPSED", nowElapsed)
+        com.focal.app.data.FocalLocalStorage.saveLong("KEY_FOCUS_START_MILLIS", startTimeMillis)
+
+        val resolvedPkgs = policy.blockedApps.map { com.focal.app.protection.ProtectionEngine.APP_NAME_TO_PACKAGE[it] ?: it }.toSet()
+        val endsAtElapsed = nowElapsed + (endTimeMillis - now).coerceAtLeast(0L)
+        com.focal.app.protection.ProtectionStateRepository.instance.updateFocusActive(
+            active = true,
+            endsAtElapsed = endsAtElapsed,
+            policy = com.focal.app.model.FocusPolicyData(
+                blockedApps = policy.blockedApps,
+                blockedPackages = resolvedPkgs,
+                blockedWebsites = policy.blockedWebsites
+            )
+        )
+        startTimer()
     }
 
     // Remote Stop Focus (Parent Controller Action)
@@ -573,6 +632,12 @@ class FocusEngine private constructor() {
             policy = com.focal.app.model.FocusPolicyData()
         )
 
+        if (triggerType == TriggerType.TIMER_EXPIRED) {
+            repository.recordSessionCompleted(session.id, session.userId, endedAt, actualDurationMs)
+        } else {
+            repository.recordSessionEndedEarly(session.id, session.userId, endedAt)
+        }
+
         // Record streak session
         val streakReason = when (triggerType) {
             TriggerType.TIMER_EXPIRED -> com.focal.app.streak.StreakEndReason.TIMER_FINISHED
@@ -625,6 +690,7 @@ class FocusEngine private constructor() {
             blockedAttemptsCount++
             distractionsPrevented++
             blockedAppOverlayName = appName
+            currentSession?.let { repository.recordSessionHeartbeat(it.id, it.userId, blockedAttemptsCount) }
 
             com.focal.app.data.ActivityRepository.instance.recordEvent(
                 type = com.focal.app.data.ActivityEventType.APP_BLOCKED,

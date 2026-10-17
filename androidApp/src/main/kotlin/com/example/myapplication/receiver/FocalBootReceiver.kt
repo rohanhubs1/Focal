@@ -21,6 +21,8 @@ class FocalBootReceiver : BroadcastReceiver() {
             }
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_LOCKED_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 com.focal.app.protection.ProtectionStateRepository.instance.loadInitialState()
+                com.example.myapplication.schedule.FocalScheduleManager.restoreCachedSchedules(context)
+                FocalRepository.instance.startChildSessionListener(context)
                 val state = com.focal.app.protection.ProtectionStateRepository.instance.state.value
                 val focusEngine = FocusEngine.instance
                 if (state.focusActive || focusEngine.sessionState == SessionState.ACTIVE) {

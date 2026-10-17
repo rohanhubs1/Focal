@@ -16,8 +16,8 @@ class FocalSyncEngine private constructor() {
     }
 
     // Firebase Cloud configuration
-    val firebaseProjectId = "focal-wellbeing"
-    val firebaseApiKey = "AIzaSyCtV7y3LePshYl3TMK0Dhv-sZd6h1mQO_I"
+    val firebaseProjectId = "focal-7c90a"
+    val firebaseApiKey = "AIzaSyCA305nYPcI7N6KTA01HIuyeUTGa4T0Xy0"
     val firestoreBaseUrl = "https://firestore.googleapis.com/v1/projects/$firebaseProjectId/databases/(default)/documents"
 
     // Cloud connection status

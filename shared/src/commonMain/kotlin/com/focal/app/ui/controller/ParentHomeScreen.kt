@@ -98,7 +98,7 @@ fun ParentHomeScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val parentInitials = remember(user.name) {
-                        com.focal.app.ui.child.components.getAvatarInitials(user.name.ifBlank { "Priya Sharma" })
+                        com.focal.app.ui.child.components.getAvatarInitials(user.name.ifBlank { "Parent" })
                     }
 
                     Box(
@@ -130,7 +130,7 @@ fun ParentHomeScreen(
                             )
                         )
                         val firstName = remember(user.name) {
-                            user.name.trim().split(" ").firstOrNull()?.ifEmpty { "Priya" } ?: "Priya"
+                            user.name.trim().split(" ").firstOrNull()?.ifEmpty { "Parent" } ?: "Parent"
                         }
                         Text(
                             text = firstName,
@@ -674,7 +674,7 @@ fun ParentHomeScreen(
                                             ),
                                             maxLines = 2
                                         )
-                                    } else if (child.deviceName.isBlank()) {
+                                    } else if (child.childUid.isNullOrBlank()) {
                                         Box(
                                             modifier = Modifier
                                                 .size(6.dp)
@@ -683,7 +683,7 @@ fun ParentHomeScreen(
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = "Phone not connected yet",
+                                            text = "Phone not connected",
                                             style = typography.caption.copy(
                                                 fontSize = 13.sp,
                                                 color = Color(0xFF6B6B6B)
@@ -715,14 +715,11 @@ fun ParentHomeScreen(
                                                 modifier = Modifier
                                                     .size(6.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color(0xFF6B6B6B))
+                                                    .background(Color.White)
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            val hours = child.todayFocusMinutes / 60
-                                            val mins = child.todayFocusMinutes % 60
-                                            val timeStr = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
                                             Text(
-                                                text = "Not focusing · $timeStr today",
+                                                text = "Connected",
                                                 style = typography.caption.copy(
                                                     fontSize = 13.sp,
                                                     color = Color(0xFFA3A3A3)
@@ -735,14 +732,15 @@ fun ParentHomeScreen(
                                             modifier = Modifier
                                                 .size(6.dp)
                                                 .clip(CircleShape)
-                                                .background(Color(0xFF6B6B6B))
+                                                .background(Color.White)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         val hours = child.todayFocusMinutes / 60
                                         val mins = child.todayFocusMinutes % 60
                                         val timeStr = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+                                        val statusText = if (child.todayFocusMinutes > 0) "Connected · $timeStr today" else "Connected"
                                         Text(
-                                            text = "Not focusing · $timeStr today",
+                                            text = statusText,
                                             style = typography.caption.copy(
                                                 fontSize = 13.sp,
                                                 color = Color(0xFFA3A3A3)
@@ -769,53 +767,55 @@ fun ParentHomeScreen(
             Spacer(modifier = Modifier.height(2.dp))
 
             // Dashed "Add child" card
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .drawBehind {
-                        drawRoundRect(
-                            color = Color(0xFF3A3A3A),
-                            style = Stroke(
-                                width = 1.5.dp.toPx(),
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f)
-                            ),
-                            cornerRadius = CornerRadius(24.dp.toPx())
-                        )
-                    }
-                    .clickable { onAddChildClick() },
-                contentAlignment = Alignment.Center
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+            if (repository.childrenList.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .drawBehind {
+                            drawRoundRect(
+                                color = Color(0xFF3A3A3A),
+                                style = Stroke(
+                                    width = 1.5.dp.toPx(),
+                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f)
+                                ),
+                                cornerRadius = CornerRadius(24.dp.toPx())
+                            )
+                        }
+                        .clickable { onAddChildClick() },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF171717)),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            imageVector = FocalIcons.Add,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF171717)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = FocalIcons.Add,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Text(
+                            text = "Add child",
+                            style = typography.headline.copy(
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
                         )
                     }
-
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    Text(
-                        text = "Add child",
-                        style = typography.headline.copy(
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                    )
                 }
             }
 

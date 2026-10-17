@@ -124,7 +124,14 @@ interface ActivityRepository {
     fun clearEvents()
 
     companion object {
-        val instance: ActivityRepository by lazy { LocalActivityRepository() }
+        private var _instance: ActivityRepository? = null
+
+        fun install(repo: ActivityRepository) {
+            _instance = repo
+        }
+
+        val instance: ActivityRepository
+            get() = _instance ?: LocalActivityRepository().also { _instance = it }
     }
 }
 
@@ -132,7 +139,7 @@ class LocalActivityRepository : ActivityRepository {
     private val _events = MutableStateFlow<List<ActivityEvent>>(createInitialEvents())
     override val events: StateFlow<List<ActivityEvent>> = _events.asStateFlow()
 
-    private val _hasUnread = MutableStateFlow(true)
+    private val _hasUnread = MutableStateFlow(com.focal.app.config.FocalConfig.isDemoMode)
     override val hasUnread: StateFlow<Boolean> = _hasUnread.asStateFlow()
 
     override fun recordEvent(
@@ -196,6 +203,9 @@ class LocalActivityRepository : ActivityRepository {
     }
 
     private fun createInitialEvents(): List<ActivityEvent> {
+        if (!com.focal.app.config.FocalConfig.isDemoMode) {
+            return emptyList()
+        }
         val now = currentTimeMillis()
         return listOf(
             ActivityEvent(

@@ -10,27 +10,6 @@ kotlin {
         jvmTarget = JvmTarget.JVM_11
     }
 }
-dependencies {
-    implementation(project(":shared"))
-
-    implementation(libs.androidx.activity.compose)
-
-    implementation(libs.compose.uiToolingPreview)
-    debugImplementation(libs.compose.uiTooling)
-
-    // CameraX and Google ML Kit Barcode Scanning
-    implementation(libs.camera.core)
-    implementation(libs.camera.camera2)
-    implementation(libs.camera.lifecycle)
-    implementation(libs.camera.view)
-    implementation(libs.mlkit.barcode.scanning)
-    // BouncyCastle for NXP secp128r1 curve originality verification
-    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
-
-    // AndroidX Core SplashScreen API
-    implementation("androidx.core:core-splashscreen:1.0.1")
-}
-
 android {
     namespace = "com.example.myapplication"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
@@ -79,9 +58,43 @@ android {
     }
 }
 
-// Conditionally apply Google Services plugin if google-services.json is present
-if (file("google-services.json").exists()) {
+dependencies {
+    implementation(project(":shared"))
+
+    implementation(libs.androidx.activity.compose)
+
+    implementation(libs.compose.uiToolingPreview)
+    debugImplementation(libs.compose.uiTooling)
+
+    // CameraX and Google ML Kit Barcode Scanning
+    implementation(libs.camera.core)
+    implementation(libs.camera.camera2)
+    implementation(libs.camera.lifecycle)
+    implementation(libs.camera.view)
+    implementation(libs.mlkit.barcode.scanning)
+    // BouncyCastle for NXP secp128r1 curve originality verification
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+
+    // AndroidX Core SplashScreen API
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // Firebase dependencies strictly for FULL flavor (BoM without -ktx)
+    "fullImplementation"(platform("com.google.firebase:firebase-bom:33.7.0"))
+    "fullImplementation"("com.google.firebase:firebase-auth")
+    "fullImplementation"("com.google.firebase:firebase-firestore")
+    "fullImplementation"("com.google.firebase:firebase-functions")
+    "fullImplementation"("com.google.firebase:firebase-messaging")
+    "fullImplementation"("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+}
+
+// Apply Google Services plugin for Full flavor
+if (file("src/full/google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
+}
+
+// Disable Google Services tasks for Demo variants so demo never processes or expects google-services.json
+tasks.matching { it.name.contains("Demo", ignoreCase = true) && it.name.contains("GoogleServices", ignoreCase = true) }.configureEach {
+    enabled = false
 }
 
 tasks.withType<JavaCompile>().configureEach {

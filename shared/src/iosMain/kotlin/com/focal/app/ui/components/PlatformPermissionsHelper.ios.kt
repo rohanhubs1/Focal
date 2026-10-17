@@ -42,10 +42,17 @@ actual object PlatformPermissionsHelper {
     actual fun shareQrCode(title: String, payload: String) {}
     actual fun printQrCode(title: String, payload: String) {}
     actual fun testBlockScreen() {}
+    actual fun isCameraPermissionGranted(): Boolean = true
+    actual fun vibrate(durationMs: Long) {}
 }
 
 @androidx.compose.runtime.Composable
 actual fun rememberDeviceAdminLauncher(onResult: (Boolean) -> Unit): () -> Unit {
+    return { onResult(true) }
+}
+
+@androidx.compose.runtime.Composable
+actual fun rememberCameraPermissionLauncher(onResult: (Boolean) -> Unit): () -> Unit {
     return { onResult(true) }
 }
 

@@ -1,156 +1,189 @@
 rules_version = '2';
-
-// Focal Firestore rules with family isolation.
-//
-// Login token claims:
-//   parent: { role: "parent" }                              family = auth.uid
-//   child:  { role: "child", parentId, childId, deviceId }  family = token.parentId
-//   admin:  { role: "admin" }
-//
-// Rule of thumb: every document carries parentId; a caller only ever sees or
-// writes documents of its own family, and may never change a document's
-// parentId/childId. Card, order, tap, pairing and subscription documents are
-// written only by Cloud Functions (Admin SDK bypasses these rules).
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ---------- helpers ----------
     function signedIn() { return request.auth != null; }
-    function isAdmin()  { return signedIn() && request.auth.token.role == 'admin'; }
-    function isParent() { return signedIn() && request.auth.token.role == 'parent'; }
-    function isChild()  { return signedIn() && request.auth.token.role == 'child'; }
-
-    // parent owns an existing / new document
-    function parentOwns()    { return isParent() && resource.data.parentId == request.auth.uid; }
-    function parentOwnsNew() { return isParent() && request.resource.data.parentId == request.auth.uid; }
-
-    // child device acting on its own child's documents
-    function childOwns() {
-      return isChild()
-        && resource.data.parentId == request.auth.token.parentId
-        && resource.data.childId == request.auth.token.childId;
+    function uid() { return request.auth.uid; }
+    function notAnonymous() {
+      return signedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
-    function childOwnsNew() {
-      return isChild()
-        && request.resource.data.parentId == request.auth.token.parentId
-        && request.resource.data.childId == request.auth.token.childId;
+    function userPath() { return /databases/$(database)/documents/users/$(uid()); }
+    function isParent() {
+      return notAnonymous() && exists(userPath()) && get(userPath()).data.role == 'CONTROLLER';
     }
+    function myFamilyId() { return get(userPath()).data.familyId; }
+    function isParentOf(familyId) { return isParent() && myFamilyId() == familyId; }
 
-    function unchanged(fields) {
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    function childPath(childId) { return /databases/$(database)/documents/children/$(childId); }
+    function isChild(childId) {
+      return signedIn() && exists(childPath(childId))
+        && get(childPath(childId)).data.get('childUid', null) == uid();
     }
-    function onlyChanges(fields) {
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    function childFamily(childId) { return get(childPath(childId)).data.familyId; }
+
+    function changedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+    function keeps(keys) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(keys);
     }
 
-    // ---------------------------------------------------------------- accounts
-    match /parents/{parentId} {
-      allow read: if (isParent() && request.auth.uid == parentId)
-                  || (isChild() && request.auth.token.parentId == parentId)
-                  || isAdmin();
-      // billing fields are set by the payment webhook only
-      allow create: if isParent() && request.auth.uid == parentId
-                    && !request.resource.data.keys().hasAny(['role', 'subscriptionStatus', 'trialEndsAt', 'nextBillingDate', 'monthlyPriceInr']);
-      allow update: if isParent() && request.auth.uid == parentId
-                    && unchanged(['role', 'subscriptionStatus', 'trialEndsAt', 'nextBillingDate', 'monthlyPriceInr']);
+    // ---------- users: own profile only; role/familyId fixed at sign-up ----------
+    match /users/{userId} {
+      allow read: if signedIn() && uid() == userId;
+      allow create: if notAnonymous() && uid() == userId
+        && request.resource.data.role == 'CONTROLLER'
+        && request.resource.data.familyId == userId;
+      allow update: if signedIn() && uid() == userId
+        && keeps(['uid', 'email', 'role', 'familyId', 'createdAt']);
       allow delete: if false;
     }
 
+    // ---------- families: familyId == owner parent's uid ----------
+    match /families/{familyId} {
+      allow read: if isParentOf(familyId);
+      allow create: if notAnonymous() && familyId == uid()
+        && request.resource.data.ownerUid == uid();
+      allow update: if signedIn() && resource.data.ownerUid == uid()
+        && keeps(['ownerUid', 'familyId']);
+      allow delete: if false;
+    }
+
+    // ---------- children ----------
     match /children/{childId} {
-      allow read: if parentOwns()
-                  || (isChild() && request.auth.token.childId == childId && resource.data.parentId == request.auth.token.parentId)
-                  || isAdmin();
-      allow create: if parentOwnsNew();
-      allow update: if (parentOwns() && unchanged(['parentId']))
-                    || (isChild() && request.auth.token.childId == childId
-                        && resource.data.parentId == request.auth.token.parentId
-                        && onlyChanges(['isOnline', 'isFocusing', 'currentSessionId', 'todayFocusMinutes', 'streakDays']));
-      allow delete: if parentOwns();
+      allow read: if isParentOf(resource.data.familyId)
+        || (signedIn() && resource.data.get('childUid', null) == uid());
+      // parent creates the child; childUid is set only when the parent approves pairing
+      allow create: if isParentOf(request.resource.data.familyId)
+        && request.resource.data.get('childUid', null) == null;
+      allow update: if
+        (isParentOf(resource.data.familyId) && keeps(['familyId']))
+        || (signedIn() && resource.data.get('childUid', null) == uid()
+            && changedOnly(['isOnline', 'lastSeenAt', 'deviceName', 'appVersion',
+                            'protectionStatus', 'fcmToken']))
+        // child may clear its own currentSessionId when a session finishes
+        || (signedIn() && resource.data.get('childUid', null) == uid()
+            && changedOnly(['currentSessionId', 'isOnline', 'lastSeenAt'])
+            && request.resource.data.currentSessionId == null);
+      allow delete: if isParentOf(resource.data.familyId);
     }
 
-    match /devices/{deviceId} {
-      allow read: if (isChild() && request.auth.token.deviceId == deviceId) || parentOwns() || isAdmin();
-      allow create: if false;  // redeemPairingCode creates it
-      allow update: if isChild() && request.auth.token.deviceId == deviceId
-                    && unchanged(['parentId', 'childId', 'hardwarePublicKey']);
-      allow delete: if parentOwns();  // parent unpairs a phone
-    }
-
-    // ---------------------------------------------------------------- parent settings
-    match /policies/{policyId} {
-      allow read: if parentOwns() || childOwns() || isAdmin();
-      allow create: if parentOwnsNew();
-      allow update: if parentOwns() && unchanged(['parentId']);
-      allow delete: if parentOwns();
-    }
-
-    match /schedules/{scheduleId} {
-      allow read: if parentOwns() || childOwns() || isAdmin();
-      allow create: if parentOwnsNew();
-      allow update: if parentOwns() && unchanged(['parentId']);
-      allow delete: if parentOwns();
-    }
-
-    match /commands/{commandId} {
-      allow read: if parentOwns() || childOwns() || isAdmin();
-      allow create: if parentOwnsNew();
-      allow update: if childOwns() && onlyChanges(['status']);
-      allow delete: if false;
-    }
-
-    // ---------------------------------------------------------------- child activity
+    // ---------- focus sessions ----------
     match /sessions/{sessionId} {
-      allow read: if parentOwns() || childOwns() || isAdmin();
-      allow create: if childOwnsNew() || parentOwnsNew();
-      allow update: if (childOwns() || parentOwns()) && unchanged(['parentId', 'childId']);
+      allow read: if isParentOf(resource.data.familyId) || isChild(resource.data.childId);
+      allow create: if
+        (isParentOf(request.resource.data.familyId)
+          && childFamily(request.resource.data.childId) == request.resource.data.familyId)
+        || (isChild(request.resource.data.childId)
+          && childFamily(request.resource.data.childId) == request.resource.data.familyId
+          && request.resource.data.status == 'ACTIVE');
+      allow update: if
+        (isParentOf(resource.data.familyId) && keeps(['familyId', 'childId']))
+        // child may only update counters, or close the session after its end time has passed
+        || (isChild(resource.data.childId) && (
+              changedOnly(['blockedAttempts', 'lastHeartbeatAt'])
+              || (changedOnly(['status', 'endedAt', 'actualDurationMillis', 'blockedAttempts', 'isActive'])
+                  && request.resource.data.status == 'COMPLETED'
+                  && request.time.toMillis() >= resource.data.endTimeMillis)
+              // child ends early by scanning the parent's current family focus QR
+              || (changedOnly(['status', 'endedAt', 'actualDurationMillis', 'blockedAttempts',
+                               'isActive', 'endedBy', 'qrKey'])
+                  && request.resource.data.status == 'ENDED_EARLY'
+                  && request.resource.data.endedBy == 'FAMILY_QR'
+                  && exists(/databases/$(database)/documents/families/$(resource.data.familyId)/qrKeys/$(request.resource.data.qrKey)))));
       allow delete: if false;
     }
 
-    match /events/{eventId} {
-      allow read: if parentOwns() || isAdmin();
-      allow create: if childOwnsNew();
+    // ---------- emergency exit requests ----------
+    match /exitRequests/{requestId} {
+      allow read: if isParentOf(resource.data.familyId) || isChild(resource.data.childId);
+      allow create: if isChild(request.resource.data.childId)
+        && childFamily(request.resource.data.childId) == request.resource.data.familyId
+        && request.resource.data.status == 'PENDING';
+      allow update: if
+        // only the parent can approve / decline
+        (isParentOf(resource.data.familyId)
+          && changedOnly(['status', 'resolvedAt', 'resolvedBy'])
+          && request.resource.data.status in ['APPROVED', 'DECLINED', 'EXPIRED', 'CANCELLED'])
+        // the child can only cancel or expire its own pending request
+        || (isChild(resource.data.childId) && resource.data.status == 'PENDING'
+          && changedOnly(['status', 'resolvedAt'])
+          && request.resource.data.status in ['CANCELLED', 'EXPIRED']);
+      allow delete: if false;
+    }
+
+    // ---------- activity log (append-only) ----------
+    match /activity/{activityId} {
+      allow read: if isParentOf(resource.data.familyId);
+      allow create: if isParentOf(request.resource.data.familyId)
+        || (isChild(request.resource.data.childId)
+            && childFamily(request.resource.data.childId) == request.resource.data.familyId);
       allow update, delete: if false;
     }
 
-    match /usageDaily/{usageId} {
-      allow read: if parentOwns() || isAdmin();
-      allow create: if childOwnsNew();
-      allow update: if childOwns() && unchanged(['parentId', 'childId']);
-      allow delete: if false;
+    // ---------- pairing codes ----------
+    // TODO (FB2): move code redemption + 5-attempt lockout to a Cloud Function.
+    match /pairingCodes/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if isParent()
+        && request.resource.data.parentId == uid()
+        && request.resource.data.familyId == myFamilyId()
+        && request.resource.data.state == 'WAITING';
+      allow update: if
+        // child redeems a waiting, unexpired code
+        (signedIn()
+          && resource.data.state == 'WAITING'
+          && request.time.toMillis() < resource.data.expiresAtMs
+          && request.resource.data.state == 'PENDING_APPROVAL'
+          && request.resource.data.childUid == uid()
+          && changedOnly(['state', 'childUid', 'childDeviceName', 'requestedAt']))
+        // owning parent approves / declines / cancels
+        || (signedIn() && resource.data.parentId == uid()
+          && keeps(['parentId', 'familyId']));
+      allow delete: if signedIn() && resource.data.parentId == uid();
     }
 
-    match /notifications/{notificationId} {
-      allow read: if signedIn() && resource.data.recipientUserId == request.auth.uid;
-      allow update: if signedIn() && resource.data.recipientUserId == request.auth.uid && onlyChanges(['isRead']);
-      allow create, delete: if false;
+    // ---------- child phone -> family link (doc id = child's anonymous uid) ----------
+    // Written by the parent when approving pairing. Lets rules know which family a child phone is in.
+    function linkPath() { return /databases/$(database)/documents/childLinks/$(uid()); }
+    function isChildInFamily(familyId) {
+      return signedIn() && exists(linkPath()) && get(linkPath()).data.familyId == familyId;
+    }
+    match /childLinks/{childUid} {
+      allow read: if (signedIn() && uid() == childUid) || isParentOf(resource.data.familyId);
+      allow create, update: if isParentOf(request.resource.data.familyId)
+        && childFamily(request.resource.data.childId) == request.resource.data.familyId;
+      allow delete: if isParentOf(resource.data.familyId);
     }
 
-    // ---------------------------------------------------------------- server-only
-    // NFC cards: parents may list their own cards; nobody writes from an app.
-    match /cards/{serial} {
-      allow read: if parentOwns() || isAdmin();
-      allow write: if false;
-    }
-    match /cardTaps/{tapId} {
-      allow read: if parentOwns() || isAdmin();
-      allow write: if false;
-    }
-    match /cardOrders/{orderId} {
-      allow read: if isAdmin();
-      allow write: if false;
-    }
-    match /pairingCodes/{codeId} {
-      allow read: if parentOwns() || isAdmin();
-      allow write: if false;
-    }
-    match /subscriptions/{subId} {
-      allow read: if parentOwns() || isAdmin();
-      allow write: if false;
-    }
-    match /adminAudit/{logId} {
-      allow read: if isAdmin();
-      allow write: if false;
+    // ---------- installed apps reported by the child phone ----------
+    match /children/{childId}/apps/{appId} {
+      allow read: if isChild(childId) || isParentOf(childFamily(childId));
+      allow write: if isChild(childId);
     }
 
-    // anything not listed above: no access
+    // ---------- policies & schedules (parent edits, child phone reads) ----------
+    match /families/{familyId}/policies/{policyId} {
+      allow read: if isParentOf(familyId) || isChildInFamily(familyId);
+      allow write: if isParentOf(familyId);
+    }
+    match /families/{familyId}/schedules/{scheduleId} {
+      allow read: if isParentOf(familyId) || isChildInFamily(familyId);
+      allow write: if isParentOf(familyId);
+    }
+
+    // ---------- family focus QR keys (parent creates / resets; nobody can list) ----------
+    match /families/{familyId}/qrKeys/{key} {
+      allow read: if isParentOf(familyId);
+      allow create, delete: if isParentOf(familyId);
+      allow update: if false;
+    }
+
+    // ---------- NFC cards: server only ----------
+    match /cards/{cardId} {
+      allow read, write: if false;
+    }
   }
 }
